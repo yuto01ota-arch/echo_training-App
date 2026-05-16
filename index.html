@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-select=none">
+    <title>High-End Echo Console</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<div id="main-menu">
+    <h2 style="text-align:center; letter-spacing: 3px; margin-bottom: 5px;">Echo Training System</h2>
+    <div style="text-align:center; color: var(--accent-blue); font-size: 0.8rem; margin-bottom: 25px; opacity: 0.8; letter-spacing: 1px;">
+        Select Scanning Target<br>
+        <span style="font-size: 0.7rem; color: #888;">ボタンを押して項目を選択してください</span>
+    </div>
+    
+    <div id="menu-container"></div>
+    <div class="disclaimer-text">
+        画像は被験者のご厚意により作られています。<br>
+        無断転用はしないでください。<br><br>
+        <span style="display:inline-block; margin-top:10px; color:#7d9bff; cursor:pointer; text-decoration:underline;" onclick="showTerms()">利用規約</span>
+    </div>
+</div>
+
+<div id="terms-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:10000; align-items:center; justify-content:center; padding:20px;">
+    <div style="background:#111; color:#eee; border:1px solid #444; border-radius:14px; width:100%; max-width:760px; max-height:90vh; overflow:auto; box-shadow:0 0 30px rgba(0,0,0,0.8); padding:24px; position:relative;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+            <h2 style="margin:0; font-size:1.2rem; color:#fff;">利用規約</h2>
+            <button onclick="closeTerms()" style="background:transparent; border:none; color:#fff; font-size:1.4rem; cursor:pointer;">×</button>
+        </div>
+        <div style="font-size:0.9rem; line-height:1.2; color:#ddd;">
+            <p><strong>1. はじめに</strong></p>
+            <p>本規約は、開発者（以下「当方」）が提供する「Echo Training System」（以下「本アプリ」）の利用条件を定めるものです。</p>
+            <p>ユーザーは本アプリを利用することで、本規約に同意したものとみなされます。</p>
+            <p><strong>2. 教育目的の限定と免責（重要）</strong></p>
+            <p>非医療機器の明示：本アプリは超音波走査技術の習得を支援するための教育・トレーニング用シミュレーターであり、医療機器ではありません。</p>
+            <p>診断使用の禁止：本アプリを実際の患者の診断、治療、または医療的判断の根拠として使用することを固く禁じます。</p>
+            <p>免責事項：本アプリの利用により生じた直接的・間接的な損害（診断ミス、学習結果、データの不具合等）について、当方は一切の責任を負いません。</p>
+            <p><strong>3. ライセンスと著作権</strong></p>
+            <p>プログラムコード：本アプリのソースコードは MITライセンス に基づき公開されています。</p>
+            <p>コンテンツの保護：アプリ内で使用されているエコー画像、動画、および各種ロゴ等のコンテンツに関する著作権は、当方に帰属します。</p>
+            <p>プログラムがMITライセンスであっても、これら画像・動画データの無断転載、抽出、二次利用、および商用利用は一切禁止します。</p>
+            <p><strong>4. 禁止事項</strong></p>
+            <p>ユーザーは、以下の行為を行ってはなりません。</p>
+            <p>本アプリから画像や動画データのみを抽出して再利用する行為。</p>
+            <p>本アプリを医療現場での実診断に流用する行為。</p>
+            <p>当方や協力機関の名称・ロゴを、あたかも特定の製品を保証しているかのような誤解を招く形で利用する行為。</p>
+        </div>
+    </div>
+</div>
+
+<div id="abdomen-nav" style="display: none; width: 100vw; height: 100vh; background-color: black; flex-direction: column; position: fixed; top: 0; left: 0; z-index: 9999;">
+    <div style="width: 100%; height: 60px; background: #1a1a1a; display: flex; align-items: center; padding: 0 15px; border-bottom: 1px solid #333; box-sizing: border-box;">
+        <div onclick="backToMainMenuFromAbdomen()" style="background: #4a1010; color: #ff5e5e; padding: 8px 15px; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 14px;">BACK</div>
+        <span style="margin-left: 15px; color: #00d1ff; font-weight: bold;">SELECT POSITION</span>
+    </div>
+
+    <div style="position: relative; flex: 1; display: flex; justify-content: center; align-items: center; overflow: hidden; background: #000;">
+        
+        <div id="nav-image-wrapper" style="position: relative; display: inline-block; height: 85%; max-width: 100%;">
+            <img src="IMG_7792 2.jpg" style="height: 100%; width: auto; display: block; object-fit: contain;">
+
+            <div onclick="openScanner(menuConfig[0].items[0])" style="position: absolute; left: 55%; top: 55%; width: 25px; height: 30%; transform: translate(-50%, -50%); background: rgba(0, 209, 255, 0.3); border: 2px solid #00d1ff; border-radius: 5px; display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 30;">
+                <span style="writing-mode: vertical-rl; color: white; font-size: 10px; font-weight: bold;">腹部長軸</span>
+            </div>
+
+            <div onclick="openScanner(menuConfig[0].items[1])" style="position: absolute; left: 40%; top: 48%; width: 30%; height: 20px; transform: translate(-50%, -50%); background: rgba(46, 204, 113, 0.3); border: 2px solid #2ecc71; border-radius: 5px; display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 10;">
+                <span style="color: white; font-size: 10px; font-weight: bold;">腹部短軸</span>
+            </div>
+
+            <div onclick="openScanner(menuConfig[0].items[2])" style="position: absolute; left: 38%; top: 38%; width: 20px; height: 20%; transform: translate(-50%, -50%) rotate(60deg); background: rgba(255, 235, 59, 0.3); border: 2px solid #ffeb3b; border-radius: 5px; display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 10;">
+                <span style="writing-mode: vertical-rl; color: white; font-size: 9px; font-weight: bold;">右肋弓下</span>
+            </div>
+
+            <div onclick="openScanner(menuConfig[0].items[3])" style="position: absolute; left:20%; top: 30%; width: 18px; height: 15%; transform: translate(-50%, -50%) rotate(-30deg); background: rgba(231, 76, 60, 0.3); border: 2px solid #e74c3c; border-radius: 5px; display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 10;">
+                <span style="writing-mode: vertical-rl; color: white; font-size: 9px; font-weight: bold;">右肋間</span>
+            </div>
+
+            <div onclick="openScanner(menuConfig[0].items[4])" style="position: absolute; left: 23%; top: 50%; width: 25px; height: 25%; transform: translate(-50%, -50%); background: rgba(155, 89, 182, 0.3); border: 2px solid #9b59b2; border-radius: 5px; display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 10;">
+                <span style="writing-mode: vertical-rl; color: white; font-size: 10px; font-weight: bold;">右側腹部</span>
+            </div>
+
+            <div onclick="openScanner(menuConfig[0].items[5])" style="position: absolute; left: 85%; top: 50%; width: 25px; height: 25%; transform: translate(-50%, -50%); background: rgba(155, 89, 182, 0.3); border: 2px solid #9b59b2; border-radius: 5px; display: flex; align-items: center; justify-content: center; cursor: pointer; z-index: 10;">
+                <span style="writing-mode: vertical-rl; color: white; font-size: 10px; font-weight: bold;">左側腹部</span>
+            </div>
+        </div>
+
+    </div>
+    <div style="color: #888; font-size: 0.7rem; text-align: center; padding: 10px;">スキャンしたい部位（色付きの線）をタップしてください</div>
+</div>
+
+<div id="echo-detail">
+    <div class="top-bar">
+        <div class="back-btn" onclick="backToMenu()">EXIT</div>
+        <span id="echo-title" style="margin-left:15px; font-weight:bold; color:var(--accent-blue);"></span>
+    </div>
+    <div id="structures-subtitle" style="padding: 8px 15px; font-size: 0.8rem; color: #aaa; background: rgba(13, 107, 185, 0.1); border-bottom: 1px solid rgba(13, 107, 185, 0.2);"></div>
+    <div id="viewer-container">
+    <div id="viewer"></div> <video id="inhale-video" style="display:none; width:100%; height:auto; position:absolute; top:0; left:0; z-index:9999; background:black;" playsinline muted></video>
+    
+    <canvas id="drawingCanvas"></canvas>
+    <canvas id="beam-canvas"></canvas>
+    <div id="probe-handle"></div>
+</div>
+    <div class="scan-controls">
+        <input type="range" id="frame-slider" min="1" max="200" value="1">
+        <div class="frame-input-group">
+            <label for="frame-input">FRAME</label>
+            <input type="number" id="frame-input" min="1" max="200" value="1" step="1" aria-label="フレーム番号">
+            <button id="frame-jump" type="button">GO</button>
+            <span style="font-size:0.9rem; color:var(--accent-blue); font-weight:bold;">現在 <span id="frame-num">1</span> / 200</span>
+        </div>
+        <div id="button-group" class="button-group"></div>
+    </div>
+</div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>

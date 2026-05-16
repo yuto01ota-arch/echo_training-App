@@ -1,0 +1,15 @@
+{
+  "short_name": "EchoNavi",
+  "name": "正中神経エコー学習ツール",
+  "display": "standalone",
+  "start_url": "index.html",
+  "background_color": "#1a1a1a",
+  "theme_color": "#1a1a1a",
+  "icons": [
+    {
+      "src": "icon.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
