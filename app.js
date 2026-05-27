@@ -534,6 +534,41 @@ function closeTerms() {
     if (modal) modal.style.display = 'none';
 }
 
+function openFeedback() {
+    const modal = document.getElementById('feedback-modal');
+    if (!modal) return;
+    modal.style.display = 'flex';
+}
+
+function closeFeedback() {
+    const modal = document.getElementById('feedback-modal');
+    if (!modal) return;
+    modal.style.display = 'none';
+}
+
+function submitFeedback() {
+    const textarea = document.getElementById('feedback-text');
+    if (!textarea) return;
+
+    const text = textarea.value.trim();
+    if (!text) {
+        alert('フィードバック内容を入力してください。');
+        return;
+    }
+
+    const feedbacks = JSON.parse(localStorage.getItem('appFeedbacks') || '[]');
+    feedbacks.push({
+        text,
+        date: new Date().toISOString(),
+        page: activeItem ? activeItem.title : 'main-menu'
+    });
+    localStorage.setItem('appFeedbacks', JSON.stringify(feedbacks));
+
+    textarea.value = '';
+    closeFeedback();
+    alert('ご意見を送信しました。ありがとうございます。');
+}
+
 function initProbe() {
     if (!probe || !activeItem) return;
     isHoldingProbe = false;
@@ -785,6 +820,9 @@ window.backToMainMenuFromAbdomen = backToMainMenuFromAbdomen;
 window.backToMenu = backToMenu;
 window.showTerms = showTerms;
 window.closeTerms = closeTerms;
+window.openFeedback = openFeedback;
+window.closeFeedback = closeFeedback;
+window.submitFeedback = submitFeedback;
 
 function clampFrameValue(value) {
     const parsed = parseInt(value, 10);
