@@ -24,5 +24,12 @@ export const menuConfig = [
             { title: "下肢(右)：鼠径", folder: "leg_upper", structures: ["総大腿動脈", "浅大腿動脈", "深大腿動脈", "総大腿静脈"], start: { x: 89.1, y: 11.2 }, end: { x: 86.2, y: 25.2 }, rotate: 10, lineRotate: 20 },
             { title: "下肢(右)：膝裏", folder: "leg_lower", structures: ["膝窩動脈"], start: { x: 80, y: 20 }, end: { x: 80, y: 40 }, rotate: 0, lineRotate: 0 }
         ]
+    },
+    {
+        category: "SAIKORO",
+        directory: "saikoro",
+        items: [
+            { title: "test", category: "SAIKORO", categoryDir: "saikoro", folder: "saikoro_test", dataPath: "./src/frontend/saikoro/test.js", structures: [], frameCount: 1140, start: { x: 40, y: 50 }, end: { x: 60, y: 50 }, rotate: 0, lineRotate: 0 }
+        ]
     }
 ];
