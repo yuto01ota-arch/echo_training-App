@@ -1,6 +1,6 @@
 # /src/backend/add-echo.py の使用方法
 1. echo_training-App にディレクトリを合わせる
-2. `python src/backend/add-echo.py` をターミナルにコピーして実行する
+2. `python3 src/backend/add-echo.py` をターミナルにコピーして実行する
 3. 大項目、小項目、動画の名前を記入し、動画ファイルをデバイスから選択して `作成してフレーム分割` をクリック
 4. 正しく作成できたことを確認、ターミナルで Ctrl + C を入力して操作を終了する
 

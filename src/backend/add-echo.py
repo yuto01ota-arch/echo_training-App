@@ -25,6 +25,7 @@ from typing import Any
 MAX_UPLOAD_BYTES = 4 * 1024 * 1024 * 1024
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 5000
+TARGET_FRAME_COUNT = 200
 
 
 class UserInputError(Exception):
@@ -236,29 +237,33 @@ def extract_frames(source_video: Path, output_dir: Path) -> tuple[int, str]:
 
 
 def extract_frames_with_ffmpeg(source_video: Path, output_dir: Path) -> tuple[int, str]:
-    frame_pattern = output_dir / "frame_%03d.jpg"
-    command = [
-        "ffmpeg",
-        "-hide_banner",
-        "-loglevel",
-        "error",
-        "-y",
-        "-i",
-        str(source_video),
-        "-q:v",
-        "2",
-        str(frame_pattern),
-    ]
-    completed = subprocess.run(command, capture_output=True, text=True, check=False)
-    if completed.returncode != 0:
-        message = completed.stderr.strip() or "ffmpeg で動画を読み込めませんでした。"
-        raise UserInputError(message)
+    with tempfile.TemporaryDirectory(prefix="add-echo-frames-") as temp_dir:
+        temp_output_dir = Path(temp_dir)
+        frame_pattern = temp_output_dir / "source_%06d.jpg"
+        command = [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-i",
+            str(source_video),
+            "-q:v",
+            "2",
+            str(frame_pattern),
+        ]
+        completed = subprocess.run(command, capture_output=True, text=True, check=False)
+        if completed.returncode != 0:
+            message = completed.stderr.strip() or "ffmpeg で動画を読み込めませんでした。"
+            raise UserInputError(message)
 
-    frame_count = count_output_frames(output_dir)
-    if frame_count == 0:
-        raise UserInputError("動画からフレームを抽出できませんでした。別の .mp4 を選択してください。")
+        source_frames = sorted(temp_output_dir.glob("source_*.jpg"))
+        if not source_frames:
+            raise UserInputError("動画からフレームを抽出できませんでした。別の .mp4 を選択してください。")
 
-    return frame_count, "ffmpeg"
+        write_sampled_frames(source_frames, output_dir)
+
+    return TARGET_FRAME_COUNT, f"ffmpeg / sampled {TARGET_FRAME_COUNT}"
 
 
 def extract_frames_with_opencv(source_video: Path, output_dir: Path) -> tuple[int, str]:
@@ -271,24 +276,76 @@ def extract_frames_with_opencv(source_video: Path, output_dir: Path) -> tuple[in
     if not capture.isOpened():
         raise UserInputError("動画を読み込めませんでした。別の .mp4 を選択してください。")
 
-    frame_count = 0
+    frame_count = int(capture.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+    if frame_count <= 0:
+        capture.release()
+        with tempfile.TemporaryDirectory(prefix="add-echo-opencv-frames-") as temp_dir:
+            temp_output_dir = Path(temp_dir)
+            return extract_all_frames_with_opencv(source_video, temp_output_dir, output_dir, cv2)
+
+    frame_indices = sample_frame_indices(frame_count, TARGET_FRAME_COUNT)
+    written_count = 0
+    try:
+        for source_index, target_index in enumerate(frame_indices, start=1):
+            capture.set(cv2.CAP_PROP_POS_FRAMES, target_index)
+            success, frame = capture.read()
+            if not success:
+                raise UserInputError(f"動画の {target_index + 1} フレーム目を読み込めませんでした。")
+
+            written_count = source_index
+            frame_path = output_dir / f"frame_{source_index:03d}.jpg"
+            if not cv2.imwrite(str(frame_path), frame):
+                raise UserInputError(f"{frame_path.name} を保存できませんでした。")
+    finally:
+        capture.release()
+
+    if written_count == 0:
+        raise UserInputError("動画からフレームを抽出できませんでした。別の .mp4 を選択してください。")
+
+    return written_count, f"opencv-python / sampled {TARGET_FRAME_COUNT}"
+
+
+def extract_all_frames_with_opencv(source_video: Path, temp_output_dir: Path, output_dir: Path, cv2: Any) -> tuple[int, str]:
+    capture = cv2.VideoCapture(str(source_video))
+    if not capture.isOpened():
+        raise UserInputError("動画を読み込めませんでした。別の .mp4 を選択してください。")
+
+    source_frames: list[Path] = []
     try:
         while True:
             success, frame = capture.read()
             if not success:
                 break
 
-            frame_count += 1
-            frame_path = output_dir / f"frame_{frame_count:03d}.jpg"
+            frame_path = temp_output_dir / f"source_{len(source_frames) + 1:06d}.jpg"
             if not cv2.imwrite(str(frame_path), frame):
                 raise UserInputError(f"{frame_path.name} を保存できませんでした。")
+            source_frames.append(frame_path)
     finally:
         capture.release()
 
-    if frame_count == 0:
+    if not source_frames:
         raise UserInputError("動画からフレームを抽出できませんでした。別の .mp4 を選択してください。")
 
-    return frame_count, "opencv-python"
+    write_sampled_frames(source_frames, output_dir)
+    return TARGET_FRAME_COUNT, f"opencv-python / sampled {TARGET_FRAME_COUNT}"
+
+
+def write_sampled_frames(source_frames: list[Path], output_dir: Path) -> None:
+    frame_indices = sample_frame_indices(len(source_frames), TARGET_FRAME_COUNT)
+    for output_index, source_index in enumerate(frame_indices, start=1):
+        shutil.copyfile(source_frames[source_index], output_dir / f"frame_{output_index:03d}.jpg")
+
+
+def sample_frame_indices(total_frames: int, target_count: int) -> list[int]:
+    if total_frames <= 0:
+        raise UserInputError("動画からフレームを抽出できませんでした。別の .mp4 を選択してください。")
+
+    if target_count <= 1:
+        return [0]
+
+    last_index = total_frames - 1
+    return [round(last_index * index / (target_count - 1)) for index in range(target_count)]
 
 
 def count_output_frames(output_dir: Path) -> int:
@@ -933,7 +990,7 @@ def render_page(project_root: Path, result: AddEchoResult | None = None, error: 
     <main>
         <section class="tool-panel">
             <h1>Echo Training 項目追加</h1>
-            <p class="lead">大項目、小項目、動画名、mp4動画を入力してください。menuConfig.js と allData.js も自動更新します。</p>
+            <p class="lead">大項目、小項目、動画名、mp4動画を入力してください。動画は等間隔に200枚のjpgへ変換します。</p>
             <form action="/add" method="post" enctype="multipart/form-data">
                 <div class="field-grid">
                     <label>
@@ -954,7 +1011,7 @@ def render_page(project_root: Path, result: AddEchoResult | None = None, error: 
                     <label>
                         動画ファイル
                         <input name="video_file" type="file" accept=".mp4,video/mp4" required>
-                        <p class="hint">.mp4 のみ選択できます。</p>
+                        <p class="hint">.mp4 のみ選択できます。出力は frame_001.jpg から frame_200.jpg です。</p>
                     </label>
                 </div>
                 <button type="submit">作成してフレーム分割</button>
