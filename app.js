@@ -47,12 +47,28 @@ function framePath(folder, frame) {
     return `data/${folder}/frame_${String(frame).padStart(3, '0')}.jpg`;
 }
 
+function bodyImagePath(item) {
+    return `data/${item.folder}/${item.bodyImage}`;
+}
+
+function usesSplitLayout(item = activeItem) {
+    return Boolean(item?.bodyImage);
+}
+
 function normalizeMenuItem(item, category) {
     item.category = item.category || category.category;
     item.categoryDir = item.categoryDir || category.directory || categoryDirectoryFor(category.category);
     item.structures = Array.isArray(item.structures) ? item.structures : [];
     item.frameCount = getItemFrameCount(item);
     return item;
+}
+
+function getProbeReferenceImage() {
+    if (usesSplitLayout()) {
+        return document.getElementById('body-image');
+    }
+
+    return document.querySelector('#viewer img.active');
 }
 
 function syncFrameControls() {
@@ -68,9 +84,9 @@ function syncFrameControls() {
 function setProbePositionFromImagePercent(xPercent, yPercent) {
     if (!vContainer || !probe) return;
     const containerRect = vContainer.getBoundingClientRect();
-    const activeImg = document.querySelector('#viewer img.active');
-    if (activeImg && activeImg.clientWidth > 0) {
-        const imgRect = activeImg.getBoundingClientRect();
+    const referenceImg = getProbeReferenceImage();
+    if (referenceImg && referenceImg.clientWidth > 0) {
+        const imgRect = referenceImg.getBoundingClientRect();
         const px = imgRect.left - containerRect.left + (xPercent / 100) * imgRect.width;
         const py = imgRect.top - containerRect.top + (yPercent / 100) * imgRect.height;
         const leftPct = (px / containerRect.width) * 100;
@@ -374,6 +390,7 @@ function loadImages(folder) {
     currentFolder = folder;
     const viewer = document.getElementById('viewer');
     viewer.innerHTML = '';
+    viewer.className = usesSplitLayout() ? 'split-view' : '';
 
     const img = document.createElement('img');
     img.id = 'current-frame';
@@ -387,7 +404,31 @@ function loadImages(folder) {
         canvas.height = img.clientHeight;
         update(1);
     };
-    viewer.appendChild(img);
+
+    if (!usesSplitLayout()) {
+        viewer.appendChild(img);
+        return;
+    }
+
+    const echoPanel = document.createElement('div');
+    echoPanel.className = 'echo-panel';
+    echoPanel.appendChild(img);
+
+    const bodyPanel = document.createElement('div');
+    bodyPanel.className = 'body-panel';
+    const bodyImg = document.createElement('img');
+    bodyImg.id = 'body-image';
+    bodyImg.classList.add('body-image');
+    bodyImg.src = bodyImagePath(activeItem);
+    bodyImg.alt = '';
+    bodyImg.onload = () => {
+        initProbe();
+        updateBeam();
+    };
+    bodyPanel.appendChild(bodyImg);
+
+    viewer.appendChild(echoPanel);
+    viewer.appendChild(bodyPanel);
 }
 
 function setFrameImage(frame) {
@@ -411,11 +452,12 @@ function draw(f) {
     if (!activeImg || activeImg.clientWidth === 0) return;
 
     const rect = activeImg.getBoundingClientRect();
+    const containerRect = vContainer.getBoundingClientRect();
     canvas.width = rect.width;
     canvas.height = rect.height;
     canvas.style.position = 'absolute';
-    canvas.style.left = activeImg.offsetLeft + 'px';
-    canvas.style.top = activeImg.offsetTop + 'px';
+    canvas.style.left = (rect.left - containerRect.left) + 'px';
+    canvas.style.top = (rect.top - containerRect.top) + 'px';
     canvas.style.width = rect.width + 'px';
     canvas.style.height = rect.height + 'px';
 
@@ -676,7 +718,7 @@ function applyProbeMove() {
     if (!isHoldingProbe || !activeItem || !lastProbeMovePosition) return;
     const { clientX, clientY } = lastProbeMovePosition;
     const rect = vContainer.getBoundingClientRect();
-    const activeImg = document.querySelector('#viewer img.active');
+    const activeImg = getProbeReferenceImage();
     let curX, curY;
     if (activeImg && activeImg.clientWidth > 0) {
         const imgRect = activeImg.getBoundingClientRect();

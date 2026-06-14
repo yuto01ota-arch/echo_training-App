@@ -104,7 +104,7 @@ body {
 #viewer-container {
     position: relative;
     width: 100%;
-    max-width: 800px;
+    max-width: 1100px;
     margin: 0 auto;
     display: flex;
     justify-content: center;
@@ -138,6 +138,53 @@ canvas {
     align-items: flex-start;
 }
 
+#viewer.split-view {
+    width: min(100%, 980px);
+    gap: 16px;
+    align-items: center;
+}
+
+.echo-panel,
+.body-panel {
+    position: relative;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-width: 0;
+}
+
+.echo-panel {
+    flex: 1.25;
+}
+
+.body-panel {
+    flex: 0.75;
+}
+
+#viewer.split-view img {
+    display: block;
+    width: 100%;
+    max-height: calc(100vh - 210px);
+    object-fit: contain;
+}
+
+#viewer.split-view #current-frame,
+#viewer.split-view #body-image {
+    display: block;
+}
+
+@media (max-width: 760px) {
+    #viewer.split-view {
+        flex-direction: column;
+        gap: 10px;
+        width: min(100%, 520px);
+    }
+
+    #viewer.split-view img {
+        max-height: 38vh;
+    }
+}
+
 #viewer img {
     max-width: 100%;
     height: auto;
@@ -145,6 +192,11 @@ canvas {
 }
 
 #viewer img.active {
+    display: block;
+}
+
+#viewer.split-view #current-frame,
+#viewer.split-view #body-image {
     display: block;
 }
 

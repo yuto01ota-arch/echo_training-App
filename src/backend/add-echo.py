@@ -11,10 +11,12 @@ warnings.filterwarnings("ignore", message="'cgi' is deprecated.*", category=Depr
 import cgi
 import html
 import json
+import math
 import re
 import shutil
 import subprocess
 import tempfile
+import urllib.parse
 import webbrowser
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -49,6 +51,18 @@ class AddEchoResult:
     all_data_updated: bool
 
 
+@dataclass(frozen=True)
+class PreparedEchoResult:
+    major_category: str
+    minor_category: str
+    video_name: str
+    image_name: str
+    body_image_file: str
+    data_dir: Path
+    frame_count: int
+    extractor: str
+
+
 class AddEchoHTTPServer(HTTPServer):
     def __init__(self, server_address: tuple[str, int], project_root: Path):
         super().__init__(server_address, AddEchoRequestHandler)
@@ -59,6 +73,10 @@ class AddEchoRequestHandler(BaseHTTPRequestHandler):
     server: AddEchoHTTPServer
 
     def do_GET(self) -> None:
+        if self.path.startswith("/data/") or self.path == "/probe_image.png":
+            self.serve_static_file()
+            return
+
         if self.path not in {"/", "/add"}:
             self.render_not_found()
             return
@@ -66,7 +84,7 @@ class AddEchoRequestHandler(BaseHTTPRequestHandler):
         self.render_html(render_page(self.server.project_root))
 
     def do_POST(self) -> None:
-        if self.path != "/add":
+        if self.path not in {"/add", "/finalize"}:
             self.render_not_found()
             return
 
@@ -105,8 +123,12 @@ class AddEchoRequestHandler(BaseHTTPRequestHandler):
         )
 
         try:
-            result = handle_form_submission(form, self.server.project_root)
-            self.render_html(render_page(self.server.project_root, result=result))
+            if self.path == "/add":
+                prepared = handle_form_submission(form, self.server.project_root)
+                self.render_html(render_page(self.server.project_root, prepared=prepared))
+            else:
+                result = handle_finalize_submission(form, self.server.project_root)
+                self.render_html(render_page(self.server.project_root, result=result))
         except UserInputError as exc:
             self.render_html(render_page(self.server.project_root, error=str(exc)), status_code=400)
         except Exception as exc:
@@ -126,19 +148,55 @@ class AddEchoRequestHandler(BaseHTTPRequestHandler):
     def render_not_found(self) -> None:
         self.render_html(render_page(self.server.project_root, error="ページが見つかりません。"), status_code=404)
 
+    def serve_static_file(self) -> None:
+        request_path = urllib.parse.unquote(self.path.split("?", 1)[0].lstrip("/"))
+        target_path = (self.server.project_root / request_path).resolve()
+        project_root = self.server.project_root.resolve()
+
+        try:
+            target_path.relative_to(project_root)
+        except ValueError:
+            self.render_not_found()
+            return
+
+        if not target_path.is_file():
+            self.render_not_found()
+            return
+
+        content_type = "application/octet-stream"
+        if target_path.suffix.lower() in {".jpg", ".jpeg"}:
+            content_type = "image/jpeg"
+        elif target_path.suffix.lower() == ".png":
+            content_type = "image/png"
+        elif target_path.suffix.lower() == ".webp":
+            content_type = "image/webp"
+
+        payload = target_path.read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
+
     def log_message(self, format: str, *args: Any) -> None:
         print(f"{self.address_string()} - {format % args}")
 
 
-def handle_form_submission(form: cgi.FieldStorage, project_root: Path) -> AddEchoResult:
+def handle_form_submission(form: cgi.FieldStorage, project_root: Path) -> PreparedEchoResult:
     major_category = validate_path_name(get_text_field(form, "major_category"), "大項目")
     minor_category = validate_path_name(get_text_field(form, "minor_category"), "小項目")
     video_name = validate_path_name(get_text_field(form, "video_name"), "動画の名前")
-    video_file = get_file_field(form, "video_file")
+    image_name = validate_path_name(get_text_field(form, "image_name"), "画像の名前")
+    video_file = get_file_field(form, "video_file", "動画ファイル")
+    image_file = get_file_field(form, "image_file", "人体画像ファイル")
 
     uploaded_filename = Path(video_file.filename or "").name
     if not uploaded_filename.lower().endswith(".mp4"):
         raise UserInputError("動画ファイルは .mp4 のみ選択できます。")
+
+    uploaded_image_filename = Path(image_file.filename or "").name
+    if not uploaded_image_filename.lower().endswith((".jpg", ".jpeg", ".png", ".webp")):
+        raise UserInputError("画像ファイルは .jpg, .jpeg, .png, .webp のみ選択できます。")
 
     with tempfile.TemporaryDirectory(prefix="add-echo-upload-") as temp_dir:
         source_video = Path(temp_dir) / "upload.mp4"
@@ -148,15 +206,86 @@ def handle_form_submission(form: cgi.FieldStorage, project_root: Path) -> AddEch
         if source_video.stat().st_size == 0:
             raise UserInputError("動画ファイルが空です。別の .mp4 を選択してください。")
 
-        return add_echo_item(project_root, major_category, minor_category, video_name, source_video)
+        source_image = Path(temp_dir) / uploaded_image_filename
+        with source_image.open("wb") as output_file:
+            shutil.copyfileobj(image_file.file, output_file)
+
+        if source_image.stat().st_size == 0:
+            raise UserInputError("画像ファイルが空です。別の画像を選択してください。")
+
+        return prepare_echo_item(project_root, major_category, minor_category, video_name, image_name, source_video, source_image)
 
 
-def add_echo_item(
+def handle_finalize_submission(form: cgi.FieldStorage, project_root: Path) -> AddEchoResult:
+    major_category = validate_path_name(get_text_field(form, "major_category"), "大項目")
+    minor_category = validate_path_name(get_text_field(form, "minor_category"), "小項目")
+    video_name = validate_path_name(get_text_field(form, "video_name"), "動画の名前")
+    image_name = validate_path_name(get_text_field(form, "image_name"), "画像の名前")
+    start_x = validate_percent(get_text_field(form, "start_x"), "エコー開始点X")
+    start_y = validate_percent(get_text_field(form, "start_y"), "エコー開始点Y")
+    end_x = validate_percent(get_text_field(form, "end_x"), "エコー終了点X")
+    end_y = validate_percent(get_text_field(form, "end_y"), "エコー終了点Y")
+
+    return finalize_echo_item(
+        project_root=project_root,
+        major_category=major_category,
+        minor_category=minor_category,
+        video_name=video_name,
+        image_name=image_name,
+        start={"x": start_x, "y": start_y},
+        end={"x": end_x, "y": end_y},
+    )
+
+
+def prepare_echo_item(
     project_root: Path,
     major_category: str,
     minor_category: str,
     video_name: str,
+    image_name: str,
     source_video: Path,
+    source_image: Path,
+) -> PreparedEchoResult:
+    data_root = project_root / "data"
+    target_data_dir = data_root / video_name
+    body_image_file = f"{image_name}.jpg"
+
+    ensure_data_directory_available(target_data_dir, video_name)
+
+    data_root.mkdir(parents=True, exist_ok=True)
+    staging_dir = Path(tempfile.mkdtemp(prefix=".add-echo-", dir=data_root))
+
+    try:
+        frame_count, extractor = extract_frames(source_video, staging_dir)
+        save_image_as_jpg(source_image, staging_dir / body_image_file)
+
+        if target_data_dir.exists():
+            target_data_dir.rmdir()
+
+        staging_dir.rename(target_data_dir)
+        return PreparedEchoResult(
+            major_category=major_category,
+            minor_category=minor_category,
+            video_name=video_name,
+            image_name=image_name,
+            body_image_file=body_image_file,
+            data_dir=target_data_dir,
+            frame_count=frame_count,
+            extractor=extractor,
+        )
+    except Exception:
+        shutil.rmtree(staging_dir, ignore_errors=True)
+        raise
+
+
+def finalize_echo_item(
+    project_root: Path,
+    major_category: str,
+    minor_category: str,
+    video_name: str,
+    image_name: str,
+    start: dict[str, float],
+    end: dict[str, float],
 ) -> AddEchoResult:
     frontend_root = project_root / "src" / "frontend"
     data_root = project_root / "data"
@@ -166,67 +295,63 @@ def add_echo_item(
     menu_config_file = frontend_root / "menuConfig.js"
     all_data_file = frontend_root / "allData.js"
     target_data_dir = data_root / video_name
+    body_image_file = f"{image_name}.jpg"
 
     ensure_directory_slot(major_dir, "大項目")
     ensure_file_slot(item_file, "小項目JS")
     ensure_file_slot(category_data_file, "大項目Data.js")
     ensure_file_slot(menu_config_file, "menuConfig.js")
     ensure_file_slot(all_data_file, "allData.js")
-    ensure_data_directory_available(target_data_dir, video_name)
+    ensure_prepared_data_directory(target_data_dir, body_image_file, video_name)
 
-    data_root.mkdir(parents=True, exist_ok=True)
-    staging_dir = Path(tempfile.mkdtemp(prefix=".add-echo-", dir=data_root))
+    frame_count = count_output_frames(target_data_dir)
+    if frame_count != TARGET_FRAME_COUNT:
+        raise UserInputError(f"data/{video_name} のフレーム数が {TARGET_FRAME_COUNT} 枚ではありません。")
 
-    try:
-        frame_count, extractor = extract_frames(source_video, staging_dir)
-        major_created = not major_dir.exists()
-        item_file_created = not item_file.exists()
-        category_data_created = not category_data_file.exists()
+    major_created = not major_dir.exists()
+    item_file_created = not item_file.exists()
+    category_data_created = not category_data_file.exists()
 
-        frontend_root.mkdir(parents=True, exist_ok=True)
-        major_dir.mkdir(parents=True, exist_ok=True)
-        ensure_item_module(item_file, minor_category)
-        category_export_name = ensure_category_data_file(
-            category_data_file=category_data_file,
-            major_category=major_category,
-            minor_category=minor_category,
-            item_file=item_file,
-        )
-        all_data_updated = ensure_all_data_file(
-            all_data_file=all_data_file,
-            category_data_file=category_data_file,
-            category_export_name=category_export_name,
-        )
-        menu_config_updated = ensure_menu_config_file(
-            menu_config_file=menu_config_file,
-            major_category=major_category,
-            minor_category=minor_category,
-            video_name=video_name,
-            frame_count=frame_count,
-        )
+    frontend_root.mkdir(parents=True, exist_ok=True)
+    major_dir.mkdir(parents=True, exist_ok=True)
+    ensure_item_module(item_file, minor_category)
+    category_export_name = ensure_category_data_file(
+        category_data_file=category_data_file,
+        major_category=major_category,
+        minor_category=minor_category,
+        item_file=item_file,
+    )
+    all_data_updated = ensure_all_data_file(
+        all_data_file=all_data_file,
+        category_data_file=category_data_file,
+        category_export_name=category_export_name,
+    )
+    menu_config_updated = ensure_menu_config_file(
+        menu_config_file=menu_config_file,
+        major_category=major_category,
+        minor_category=minor_category,
+        video_name=video_name,
+        image_name=image_name,
+        frame_count=frame_count,
+        start=start,
+        end=end,
+    )
 
-        if target_data_dir.exists():
-            target_data_dir.rmdir()
-
-        staging_dir.rename(target_data_dir)
-        return AddEchoResult(
-            major_dir=major_dir,
-            item_file=item_file,
-            category_data_file=category_data_file,
-            menu_config_file=menu_config_file,
-            all_data_file=all_data_file,
-            data_dir=target_data_dir,
-            frame_count=frame_count,
-            extractor=extractor,
-            major_created=major_created,
-            item_file_created=item_file_created,
-            category_data_created=category_data_created,
-            menu_config_updated=menu_config_updated,
-            all_data_updated=all_data_updated,
-        )
-    except Exception:
-        shutil.rmtree(staging_dir, ignore_errors=True)
-        raise
+    return AddEchoResult(
+        major_dir=major_dir,
+        item_file=item_file,
+        category_data_file=category_data_file,
+        menu_config_file=menu_config_file,
+        all_data_file=all_data_file,
+        data_dir=target_data_dir,
+        frame_count=frame_count,
+        extractor="prepared data",
+        major_created=major_created,
+        item_file_created=item_file_created,
+        category_data_created=category_data_created,
+        menu_config_updated=menu_config_updated,
+        all_data_updated=all_data_updated,
+    )
 
 
 def extract_frames(source_video: Path, output_dir: Path) -> tuple[int, str]:
@@ -234,6 +359,34 @@ def extract_frames(source_video: Path, output_dir: Path) -> tuple[int, str]:
         return extract_frames_with_ffmpeg(source_video, output_dir)
 
     return extract_frames_with_opencv(source_video, output_dir)
+
+
+def save_image_as_jpg(source_image: Path, target_image: Path) -> None:
+    if source_image.suffix.lower() in {".jpg", ".jpeg"}:
+        shutil.copyfile(source_image, target_image)
+        return
+
+    if shutil.which("ffmpeg"):
+        command = [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-i",
+            str(source_image),
+            "-frames:v",
+            "1",
+            str(target_image),
+        ]
+        completed = subprocess.run(command, capture_output=True, text=True, check=False)
+        if completed.returncode == 0 and target_image.exists() and target_image.stat().st_size > 0:
+            return
+
+        message = completed.stderr.strip() or "画像をjpgへ変換できませんでした。"
+        raise UserInputError(message)
+
+    raise UserInputError("png/webp画像をjpgへ変換するには ffmpeg が必要です。")
 
 
 def extract_frames_with_ffmpeg(source_video: Path, output_dir: Path) -> tuple[int, str]:
@@ -359,16 +512,16 @@ def get_text_field(form: cgi.FieldStorage, field_name: str) -> str:
     return str(value)
 
 
-def get_file_field(form: cgi.FieldStorage, field_name: str) -> cgi.FieldStorage:
+def get_file_field(form: cgi.FieldStorage, field_name: str, label: str) -> cgi.FieldStorage:
     if field_name not in form:
-        raise UserInputError("動画ファイルを選択してください。")
+        raise UserInputError(f"{label}を選択してください。")
 
     value = form[field_name]
     if isinstance(value, list):
         value = value[0]
 
     if not isinstance(value, cgi.FieldStorage) or not value.filename:
-        raise UserInputError("動画ファイルを選択してください。")
+        raise UserInputError(f"{label}を選択してください。")
 
     return value
 
@@ -410,6 +563,26 @@ def ensure_data_directory_available(target_data_dir: Path, video_name: str) -> N
 
     if target_data_dir.exists() and any(target_data_dir.iterdir()):
         raise UserInputError(f"data/{video_name} は既に存在し、中身があります。別の動画の名前を使ってください。")
+
+
+def ensure_prepared_data_directory(target_data_dir: Path, body_image_file: str, video_name: str) -> None:
+    if not target_data_dir.is_dir():
+        raise UserInputError(f"data/{video_name} が見つかりません。先に動画と画像を保存してください。")
+
+    if not (target_data_dir / body_image_file).is_file():
+        raise UserInputError(f"data/{video_name}/{body_image_file} が見つかりません。")
+
+
+def validate_percent(value: str, label: str) -> float:
+    try:
+        parsed = float(value)
+    except ValueError as exc:
+        raise UserInputError(f"{label}が数値ではありません。") from exc
+
+    if parsed < 0 or parsed > 100:
+        raise UserInputError(f"{label}は0から100の範囲で指定してください。")
+
+    return round(parsed, 3)
 
 
 def ensure_item_module(item_file: Path, minor_category: str) -> None:
@@ -494,10 +667,13 @@ def ensure_menu_config_file(
     major_category: str,
     minor_category: str,
     video_name: str,
+    image_name: str,
     frame_count: int,
+    start: dict[str, float],
+    end: dict[str, float],
 ) -> bool:
     category_label = category_label_from_directory(major_category)
-    item_entry = build_menu_item_entry(major_category, minor_category, video_name, frame_count)
+    item_entry = build_menu_item_entry(major_category, minor_category, video_name, image_name, frame_count, start, end)
 
     if not menu_config_file.exists():
         menu_config_file.write_text(
@@ -544,24 +720,47 @@ def ensure_menu_config_file(
     return text != original
 
 
-def build_menu_item_entry(major_category: str, minor_category: str, video_name: str, frame_count: int) -> str:
+def build_menu_item_entry(
+    major_category: str,
+    minor_category: str,
+    video_name: str,
+    image_name: str,
+    frame_count: int,
+    start: dict[str, float],
+    end: dict[str, float],
+) -> str:
     data_path = f"./src/frontend/{major_category}/{minor_category}.js"
     category_label = category_label_from_directory(major_category)
+    rotate = probe_rotation_from_points(start, end)
     return (
         "{ "
         f"title: {js_string(minor_category)}, "
         f"category: {js_string(category_label)}, "
         f"categoryDir: {js_string(major_category)}, "
         f"folder: {js_string(video_name)}, "
+        f"bodyImage: {js_string(f'{image_name}.jpg')}, "
         f"dataPath: {js_string(data_path)}, "
         "structures: [], "
         f"frameCount: {frame_count}, "
-        "start: { x: 40, y: 50 }, "
-        "end: { x: 60, y: 50 }, "
-        "rotate: 0, "
+        f"start: {{ x: {format_number(start['x'])}, y: {format_number(start['y'])} }}, "
+        f"end: {{ x: {format_number(end['x'])}, y: {format_number(end['y'])} }}, "
+        f"rotate: {format_number(rotate)}, "
         "lineRotate: 0 "
         "}"
     )
+
+
+def probe_rotation_from_points(start: dict[str, float], end: dict[str, float]) -> float:
+    dx = end["x"] - start["x"]
+    dy = end["y"] - start["y"]
+    if dx == 0 and dy == 0:
+        return 0
+
+    return round(math.degrees(math.atan2(dy, dx)) + 90, 3)
+
+
+def format_number(value: float) -> str:
+    return f"{value:.3f}".rstrip("0").rstrip(".")
 
 
 def category_label_from_directory(major_category: str) -> str:
@@ -764,10 +963,17 @@ def insert_into_js_array(text: str, array_open: int, array_close: int, entry: st
     return text[:insert_at] + insertion + trailing_whitespace + text[array_close:]
 
 
-def render_page(project_root: Path, result: AddEchoResult | None = None, error: str | None = None) -> str:
+def render_page(
+    project_root: Path,
+    result: AddEchoResult | None = None,
+    prepared: PreparedEchoResult | None = None,
+    error: str | None = None,
+) -> str:
     escaped_root = html.escape(str(project_root))
     notice = ""
-    if result:
+    if prepared:
+        notice = render_preview(project_root, prepared)
+    elif result:
         notice = render_result(project_root, result)
     elif error:
         notice = f"""
@@ -966,6 +1172,97 @@ def render_page(project_root: Path, result: AddEchoResult | None = None, error: 
             font-size: 13px;
         }}
 
+        .preview-form {{
+            margin-top: 18px;
+        }}
+
+        .preview-shell {{
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+            gap: 16px;
+            margin: 18px 0;
+        }}
+
+        .preview-pane {{
+            display: grid;
+            gap: 8px;
+        }}
+
+        .preview-pane span {{
+            color: var(--muted);
+            font-size: 14px;
+            font-weight: 700;
+        }}
+
+        .preview-pane img {{
+            max-width: 100%;
+            border-radius: 6px;
+            border: 1px solid var(--border);
+            background: #000;
+        }}
+
+        .body-picker {{
+            position: relative;
+            line-height: 0;
+            cursor: crosshair;
+        }}
+
+        .body-picker > img:first-child {{
+            display: block;
+            width: 100%;
+        }}
+
+        #probe-preview {{
+            position: absolute;
+            display: none;
+            width: 54px;
+            border: 0;
+            background: transparent;
+            transform-origin: center;
+            pointer-events: none;
+            z-index: 3;
+        }}
+
+        .point-marker {{
+            position: absolute;
+            display: none;
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            z-index: 4;
+        }}
+
+        .start-marker {{
+            background: #2ecc71;
+            box-shadow: 0 0 0 3px rgba(46, 204, 113, 0.25);
+        }}
+
+        .end-marker {{
+            background: #ff5e5e;
+            box-shadow: 0 0 0 3px rgba(255, 94, 94, 0.25);
+        }}
+
+        .preview-line {{
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 2;
+        }}
+
+        .preview-line line {{
+            stroke: #00d1ff;
+            stroke-width: 2;
+            stroke-linecap: round;
+        }}
+
+        button:disabled {{
+            cursor: not-allowed;
+            opacity: 0.5;
+        }}
+
         @media (max-width: 720px) {{
             main {{
                 width: min(100% - 24px, 920px);
@@ -977,6 +1274,10 @@ def render_page(project_root: Path, result: AddEchoResult | None = None, error: 
             }}
 
             .field-grid {{
+                grid-template-columns: 1fr;
+            }}
+
+            .preview-shell {{
                 grid-template-columns: 1fr;
             }}
 
@@ -1009,9 +1310,19 @@ def render_page(project_root: Path, result: AddEchoResult | None = None, error: 
                         <p class="hint">data/動画の名前/frame_001.jpg の保存先に使います。</p>
                     </label>
                     <label>
+                        画像の名前
+                        <input name="image_name" type="text" required autocomplete="off" placeholder="例: body">
+                        <p class="hint">data/動画の名前/画像の名前.jpg として保存します。</p>
+                    </label>
+                    <label>
                         動画ファイル
                         <input name="video_file" type="file" accept=".mp4,video/mp4" required>
                         <p class="hint">.mp4 のみ選択できます。出力は frame_001.jpg から frame_200.jpg です。</p>
+                    </label>
+                    <label>
+                        人体画像ファイル
+                        <input name="image_file" type="file" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" required>
+                        <p class="hint">右側に表示する静止画です。</p>
                     </label>
                 </div>
                 <button type="submit">作成してフレーム分割</button>
@@ -1023,6 +1334,112 @@ def render_page(project_root: Path, result: AddEchoResult | None = None, error: 
 </body>
 </html>
 """
+
+
+def render_preview(project_root: Path, prepared: PreparedEchoResult) -> str:
+    frame_src = f"/data/{prepared.video_name}/frame_001.jpg"
+    body_src = f"/data/{prepared.video_name}/{prepared.body_image_file}"
+    return f"""
+    <section class="notice notice-success" aria-live="polite">
+        <h2>フレーム分割が完了しました</h2>
+        <p>右側の人体画像をクリックして、エコー開始点とエコー終了点を指定してください。</p>
+        <form class="preview-form" action="/finalize" method="post">
+            <input type="hidden" name="major_category" value="{html.escape(prepared.major_category)}">
+            <input type="hidden" name="minor_category" value="{html.escape(prepared.minor_category)}">
+            <input type="hidden" name="video_name" value="{html.escape(prepared.video_name)}">
+            <input type="hidden" name="image_name" value="{html.escape(prepared.image_name)}">
+            <input type="hidden" id="start_x" name="start_x">
+            <input type="hidden" id="start_y" name="start_y">
+            <input type="hidden" id="end_x" name="end_x">
+            <input type="hidden" id="end_y" name="end_y">
+            <div class="preview-shell">
+                <div class="preview-pane">
+                    <span>Echo frame</span>
+                    <img src="{html.escape(frame_src)}" alt="エコーフレームのプレビュー">
+                </div>
+                <div class="preview-pane">
+                    <span>Body image</span>
+                    <div id="body-picker" class="body-picker">
+                        <img id="body-preview" src="{html.escape(body_src)}" alt="人体画像のプレビュー">
+                        <img id="probe-preview" src="/probe_image.png" alt="" aria-hidden="true">
+                        <div id="start-marker" class="point-marker start-marker"></div>
+                        <div id="end-marker" class="point-marker end-marker"></div>
+                        <svg id="preview-line" class="preview-line"></svg>
+                    </div>
+                </div>
+            </div>
+            <p id="pick-status" class="hint">1回目のクリック: 開始点</p>
+            <button id="finalize-button" type="submit" disabled>開始点と終了点を保存</button>
+        </form>
+        <script>
+            (() => {{
+                const picker = document.getElementById('body-picker');
+                const probe = document.getElementById('probe-preview');
+                const startMarker = document.getElementById('start-marker');
+                const endMarker = document.getElementById('end-marker');
+                const line = document.getElementById('preview-line');
+                const status = document.getElementById('pick-status');
+                const button = document.getElementById('finalize-button');
+                const fields = {{
+                    startX: document.getElementById('start_x'),
+                    startY: document.getElementById('start_y'),
+                    endX: document.getElementById('end_x'),
+                    endY: document.getElementById('end_y')
+                }};
+                let start = null;
+                let end = null;
+
+                function setMarker(marker, point) {{
+                    marker.style.left = point.x + '%';
+                    marker.style.top = point.y + '%';
+                    marker.style.display = 'block';
+                }}
+
+                function updateProbe() {{
+                    if (!start || !end) return;
+                    const angle = Math.atan2(end.y - start.y, end.x - start.x) * 180 / Math.PI + 90;
+                    probe.style.left = start.x + '%';
+                    probe.style.top = start.y + '%';
+                    probe.style.transform = `translate(-50%, -50%) rotate(${{angle}}deg)`;
+                    probe.style.display = 'block';
+                    line.innerHTML = `<line x1="${{start.x}}%" y1="${{start.y}}%" x2="${{end.x}}%" y2="${{end.y}}%" />`;
+                }}
+
+                picker.addEventListener('click', (event) => {{
+                    const rect = picker.getBoundingClientRect();
+                    const point = {{
+                        x: Math.max(0, Math.min(100, ((event.clientX - rect.left) / rect.width) * 100)),
+                        y: Math.max(0, Math.min(100, ((event.clientY - rect.top) / rect.height) * 100))
+                    }};
+
+                    if (!start || (start && end)) {{
+                        start = point;
+                        end = null;
+                        fields.startX.value = point.x.toFixed(3);
+                        fields.startY.value = point.y.toFixed(3);
+                        fields.endX.value = '';
+                        fields.endY.value = '';
+                        setMarker(startMarker, point);
+                        endMarker.style.display = 'none';
+                        probe.style.display = 'none';
+                        line.innerHTML = '';
+                        button.disabled = true;
+                        status.textContent = '2回目のクリック: 終了点';
+                        return;
+                    }}
+
+                    end = point;
+                    fields.endX.value = point.x.toFixed(3);
+                    fields.endY.value = point.y.toFixed(3);
+                    setMarker(endMarker, point);
+                    updateProbe();
+                    button.disabled = false;
+                    status.textContent = '開始点と終了点を保存できます。もう一度クリックすると開始点から指定し直します。';
+                }});
+            }})();
+        </script>
+    </section>
+    """
 
 
 def render_result(project_root: Path, result: AddEchoResult) -> str:
