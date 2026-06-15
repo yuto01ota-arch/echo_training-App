@@ -1258,6 +1258,35 @@ def render_page(
             stroke-linecap: round;
         }}
 
+        .motion-controls {{
+            display: grid;
+            gap: 10px;
+            margin: 4px 0 10px;
+        }}
+
+        .motion-controls-row {{
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }}
+
+        .motion-controls button {{
+            min-height: 38px;
+            padding: 8px 14px;
+        }}
+
+        #preview-frame-slider {{
+            width: 100%;
+            accent-color: var(--primary);
+        }}
+
+        .frame-count {{
+            min-width: 110px;
+            color: var(--muted);
+            font-weight: 700;
+            text-align: right;
+        }}
+
         button:disabled {{
             cursor: not-allowed;
             opacity: 0.5;
@@ -1355,7 +1384,7 @@ def render_preview(project_root: Path, prepared: PreparedEchoResult) -> str:
             <div class="preview-shell">
                 <div class="preview-pane">
                     <span>Echo frame</span>
-                    <img src="{html.escape(frame_src)}" alt="エコーフレームのプレビュー">
+                    <img id="echo-preview" src="{html.escape(frame_src)}" alt="エコーフレームのプレビュー">
                 </div>
                 <div class="preview-pane">
                     <span>Body image</span>
@@ -1368,18 +1397,31 @@ def render_preview(project_root: Path, prepared: PreparedEchoResult) -> str:
                     </div>
                 </div>
             </div>
+            <div class="motion-controls">
+                <div class="motion-controls-row">
+                    <button id="preview-play-button" type="button" disabled>再生</button>
+                    <span id="preview-frame-count" class="frame-count">1 / {prepared.frame_count}</span>
+                </div>
+                <input id="preview-frame-slider" type="range" min="1" max="{prepared.frame_count}" value="1" disabled>
+            </div>
             <p id="pick-status" class="hint">1回目のクリック: 開始点</p>
             <button id="finalize-button" type="submit" disabled>開始点と終了点を保存</button>
         </form>
         <script>
             (() => {{
+                const frameCount = {prepared.frame_count};
+                const videoName = {js_string(prepared.video_name)};
                 const picker = document.getElementById('body-picker');
+                const echoPreview = document.getElementById('echo-preview');
                 const probe = document.getElementById('probe-preview');
                 const startMarker = document.getElementById('start-marker');
                 const endMarker = document.getElementById('end-marker');
                 const line = document.getElementById('preview-line');
                 const status = document.getElementById('pick-status');
                 const button = document.getElementById('finalize-button');
+                const playButton = document.getElementById('preview-play-button');
+                const frameSlider = document.getElementById('preview-frame-slider');
+                const frameCountLabel = document.getElementById('preview-frame-count');
                 const fields = {{
                     startX: document.getElementById('start_x'),
                     startY: document.getElementById('start_y'),
@@ -1388,6 +1430,11 @@ def render_preview(project_root: Path, prepared: PreparedEchoResult) -> str:
                 }};
                 let start = null;
                 let end = null;
+                let previewTimer = null;
+
+                function frameSrc(frame) {{
+                    return `/data/${{videoName}}/frame_${{String(frame).padStart(3, '0')}}.jpg`;
+                }}
 
                 function setMarker(marker, point) {{
                     marker.style.left = point.x + '%';
@@ -1395,14 +1442,48 @@ def render_preview(project_root: Path, prepared: PreparedEchoResult) -> str:
                     marker.style.display = 'block';
                 }}
 
-                function updateProbe() {{
+                function setPlaybackEnabled(enabled) {{
+                    frameSlider.disabled = !enabled;
+                    playButton.disabled = !enabled;
+                    if (!enabled) stopPlayback();
+                }}
+
+                function stopPlayback() {{
+                    if (previewTimer !== null) {{
+                        clearInterval(previewTimer);
+                        previewTimer = null;
+                    }}
+                    playButton.textContent = '再生';
+                }}
+
+                function updateMotionPreview() {{
                     if (!start || !end) return;
+                    const frame = Math.max(1, Math.min(frameCount, parseInt(frameSlider.value, 10) || 1));
+                    const progress = frameCount <= 1 ? 0 : (frame - 1) / (frameCount - 1);
+                    const x = start.x + (end.x - start.x) * progress;
+                    const y = start.y + (end.y - start.y) * progress;
                     const angle = Math.atan2(end.y - start.y, end.x - start.x) * 180 / Math.PI + 90;
-                    probe.style.left = start.x + '%';
-                    probe.style.top = start.y + '%';
+                    echoPreview.src = frameSrc(frame);
+                    frameCountLabel.textContent = `${{frame}} / ${{frameCount}}`;
+                    probe.style.left = x + '%';
+                    probe.style.top = y + '%';
                     probe.style.transform = `translate(-50%, 0%) rotate(${{angle}}deg)`;
                     probe.style.display = 'block';
                     line.innerHTML = `<line x1="${{start.x}}%" y1="${{start.y}}%" x2="${{end.x}}%" y2="${{end.y}}%" />`;
+                }}
+
+                function togglePlayback() {{
+                    if (previewTimer !== null) {{
+                        stopPlayback();
+                        return;
+                    }}
+
+                    playButton.textContent = '停止';
+                    previewTimer = setInterval(() => {{
+                        const current = parseInt(frameSlider.value, 10) || 1;
+                        frameSlider.value = current >= frameCount ? 1 : current + 1;
+                        updateMotionPreview();
+                    }}, 80);
                 }}
 
                 picker.addEventListener('click', (event) => {{
@@ -1424,6 +1505,10 @@ def render_preview(project_root: Path, prepared: PreparedEchoResult) -> str:
                         probe.style.display = 'none';
                         line.innerHTML = '';
                         button.disabled = true;
+                        frameSlider.value = 1;
+                        echoPreview.src = frameSrc(1);
+                        frameCountLabel.textContent = `1 / ${{frameCount}}`;
+                        setPlaybackEnabled(false);
                         status.textContent = '2回目のクリック: 終了点';
                         return;
                     }}
@@ -1432,10 +1517,15 @@ def render_preview(project_root: Path, prepared: PreparedEchoResult) -> str:
                     fields.endX.value = point.x.toFixed(3);
                     fields.endY.value = point.y.toFixed(3);
                     setMarker(endMarker, point);
-                    updateProbe();
+                    frameSlider.value = 1;
+                    setPlaybackEnabled(true);
+                    updateMotionPreview();
                     button.disabled = false;
-                    status.textContent = '開始点と終了点を保存できます。もう一度クリックすると開始点から指定し直します。';
+                    status.textContent = 'スクロールバーでエコー画像とprobeの動きを確認できます。もう一度クリックすると開始点から指定し直します。';
                 }});
+
+                frameSlider.addEventListener('input', updateMotionPreview);
+                playButton.addEventListener('click', togglePlayback);
             }})();
         </script>
     </section>
