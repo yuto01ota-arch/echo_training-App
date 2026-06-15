@@ -1,6 +1,7 @@
-import { menuConfig } from "./data/menuConfig.js";
+import { menuConfig } from "./src/frontend/menuConfig.js";
 
 let currentFrame = 1;
+let currentFrameCount = 200;
 let isDragging = false;
 let lastX = 0;
 let activeItem = null;
@@ -18,13 +19,79 @@ let lastProbeMovePosition = null;
 let tiltSlider = null;
 let isAdjustingTiltSlider = false;
 
+const CATEGORY_DIRECTORIES = {
+    ABDOMEN: 'abdomen',
+    'UPPER LIMB': 'upperLimb',
+    'LOWER LIMB': 'lowerLimb'
+};
+
+function normalizeCategoryName(value) {
+    return String(value || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
+
+function categoryDirectoryFor(categoryName) {
+    const direct = CATEGORY_DIRECTORIES[categoryName];
+    if (direct) return direct;
+
+    const normalized = normalizeCategoryName(categoryName);
+    const match = Object.entries(CATEGORY_DIRECTORIES).find(([label]) => normalizeCategoryName(label) === normalized);
+    return match ? match[1] : '';
+}
+
+function getItemFrameCount(item) {
+    const parsed = Number(item?.frameCount);
+    return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : 200;
+}
+
+function framePath(folder, frame) {
+    return `data/${folder}/frame_${String(frame).padStart(3, '0')}.jpg`;
+}
+
+function bodyImagePath(item) {
+    return `data/${item.folder}/${item.bodyImage}`;
+}
+
+function usesSplitLayout(item = activeItem) {
+    return Boolean(item?.bodyImage);
+}
+
+function normalizeMenuItem(item, category) {
+    item.category = item.category || category.category;
+    item.categoryDir = item.categoryDir || category.directory || categoryDirectoryFor(category.category);
+    item.structures = Array.isArray(item.structures) ? item.structures : [];
+    item.frameCount = getItemFrameCount(item);
+    return item;
+}
+
+function getProbeReferenceImage() {
+    if (usesSplitLayout()) {
+        return document.getElementById('body-image');
+    }
+
+    return document.querySelector('#viewer img.active');
+}
+
+function probeTransform(rotation, alignTip = usesSplitLayout()) {
+    const translate = alignTip ? 'translate(-50%, 0%)' : 'translate(-50%, -50%)';
+    return `${translate} rotate(${rotation || 0}deg)`;
+}
+
+function syncFrameControls() {
+    const slider = document.getElementById('frame-slider');
+    const frameInput = document.getElementById('frame-input');
+    const frameTotal = document.getElementById('frame-total');
+    if (slider) slider.max = currentFrameCount;
+    if (frameInput) frameInput.max = currentFrameCount;
+    if (frameTotal) frameTotal.innerText = currentFrameCount;
+}
+
 // Set probe position based on percentages relative to the active image area when available.
 function setProbePositionFromImagePercent(xPercent, yPercent) {
     if (!vContainer || !probe) return;
     const containerRect = vContainer.getBoundingClientRect();
-    const activeImg = document.querySelector('#viewer img.active');
-    if (activeImg && activeImg.clientWidth > 0) {
-        const imgRect = activeImg.getBoundingClientRect();
+    const referenceImg = getProbeReferenceImage();
+    if (referenceImg && referenceImg.clientWidth > 0) {
+        const imgRect = referenceImg.getBoundingClientRect();
         const px = imgRect.left - containerRect.left + (xPercent / 100) * imgRect.width;
         const py = imgRect.top - containerRect.top + (yPercent / 100) * imgRect.height;
         const leftPct = (px / containerRect.width) * 100;
@@ -103,6 +170,7 @@ function initMenu() {
         list.className = 'item-list';
 
         cat.items.forEach(item => {
+            normalizeMenuItem(item, cat);
             const div = document.createElement('div');
             div.className = 'item';
             div.innerText = item.title;
@@ -118,22 +186,27 @@ function initMenu() {
 
 async function loadDataForItem(item) {
     const folder = item.folder;
-    if (folder.startsWith('abs')) {
-        const module = await import(`./data/abdomen/${folder}.js`);
+    if (item.dataPath) {
+        const module = await import(item.dataPath);
         return module.default || module;
     }
-    if (folder === 'median_nerve_200' || folder === 'ulnar' || folder === 'radial') {
-        const module = await import(`./data/upperLimb/${folder}.js`);
-        return module.default || module;
-    }
-    if (folder === 'leg_upper' || folder === 'leg_lower') {
-        const module = await import(`./data/lowerLimb/${folder}.js`);
-        return module.default || module;
-    }
+
     if (folder === 'all') {
-        const module = await import("./data/allData.js");
+        const module = await import("./src/frontend/allData.js");
         return module.allData || module.default || module;
     }
+
+    if (item.categoryDir) {
+        const module = await import(`./src/frontend/${item.categoryDir}/${folder}.js`);
+        return module.default || module;
+    }
+
+    const fallbackCategoryDir = categoryDirectoryFor(item.category);
+    if (fallbackCategoryDir) {
+        const module = await import(`./src/frontend/${fallbackCategoryDir}/${folder}.js`);
+        return module.default || module;
+    }
+
     return null;
 }
 
@@ -148,6 +221,8 @@ async function openScanner(item) {
 
     activeItem = item;
     activeItem.showGuide = false;
+    currentFrameCount = getItemFrameCount(item);
+    syncFrameControls();
     visibleStructures = {};
     document.getElementById('main-menu').style.display = 'none';
     document.getElementById('echo-detail').style.display = 'flex';
@@ -173,7 +248,7 @@ async function openScanner(item) {
 
     if (probe && item.start) {
         setProbePositionFromImagePercent(item.start.x, item.start.y);
-        probe.style.transform = `translate(-50%, -50%) rotate(${item.rotate || 0}deg)`;
+        probe.style.transform = probeTransform(item.rotate || 0);
     }
 
     const caseData = activeData?.[item.title] || {};
@@ -259,7 +334,7 @@ async function openScanner(item) {
             // keep probe at anchor (image-relative)
             if (activeItem.anchor) setProbePositionFromImagePercent(activeItem.anchor.x, activeItem.anchor.y);
 
-            const frame = Math.floor(r * 199) + 1;
+            const frame = Math.floor(r * (currentFrameCount - 1)) + 1;
             if (frame !== currentFrame) update(frame);
             updateBeam();
             // small debounce to avoid immediate overwrite from pointermove
@@ -320,26 +395,51 @@ function loadImages(folder) {
     currentFolder = folder;
     const viewer = document.getElementById('viewer');
     viewer.innerHTML = '';
+    viewer.className = usesSplitLayout() ? 'split-view' : '';
 
     const img = document.createElement('img');
     img.id = 'current-frame';
     img.classList.add('active');
     img.style.width = '100%';
     img.style.height = 'auto';
-    img.src = `${folder}/frame_${String(1).padStart(3, '0')}.jpg`;
+    img.src = framePath(folder, 1);
     img.onload = () => {
         const canvas = document.getElementById('drawingCanvas');
         canvas.width = img.clientWidth;
         canvas.height = img.clientHeight;
         update(1);
     };
-    viewer.appendChild(img);
+
+    if (!usesSplitLayout()) {
+        viewer.appendChild(img);
+        return;
+    }
+
+    const echoPanel = document.createElement('div');
+    echoPanel.className = 'echo-panel';
+    echoPanel.appendChild(img);
+
+    const bodyPanel = document.createElement('div');
+    bodyPanel.className = 'body-panel';
+    const bodyImg = document.createElement('img');
+    bodyImg.id = 'body-image';
+    bodyImg.classList.add('body-image');
+    bodyImg.src = bodyImagePath(activeItem);
+    bodyImg.alt = '';
+    bodyImg.onload = () => {
+        initProbe();
+        updateBeam();
+    };
+    bodyPanel.appendChild(bodyImg);
+
+    viewer.appendChild(echoPanel);
+    viewer.appendChild(bodyPanel);
 }
 
 function setFrameImage(frame) {
     const img = document.getElementById('current-frame');
     if (!img || !currentFolder) return;
-    const nextSrc = `${currentFolder}/frame_${String(frame).padStart(3, '0')}.jpg`;
+    const nextSrc = framePath(currentFolder, frame);
     if (img.getAttribute('src') === nextSrc) return;
     const targetFrame = frame;
     img.onload = () => {
@@ -357,11 +457,12 @@ function draw(f) {
     if (!activeImg || activeImg.clientWidth === 0) return;
 
     const rect = activeImg.getBoundingClientRect();
+    const containerRect = vContainer.getBoundingClientRect();
     canvas.width = rect.width;
     canvas.height = rect.height;
     canvas.style.position = 'absolute';
-    canvas.style.left = activeImg.offsetLeft + 'px';
-    canvas.style.top = activeImg.offsetTop + 'px';
+    canvas.style.left = (rect.left - containerRect.left) + 'px';
+    canvas.style.top = (rect.top - containerRect.top) + 'px';
     canvas.style.width = rect.width + 'px';
     canvas.style.height = rect.height + 'px';
 
@@ -505,7 +606,7 @@ function backToMenu() {
     // remove tilt control if present
     const existingTilt = document.getElementById('tilt-control');
     if (existingTilt) existingTilt.remove();
-    if (activeItem && activeItem.folder.includes('abs')) {
+    if (activeItem && activeItem.category === 'ABDOMEN') {
         document.getElementById('abdomen-nav').style.display = 'flex';
     } else {
         document.getElementById('main-menu').style.display = 'block';
@@ -583,7 +684,7 @@ function initProbe() {
         }
     } else if (activeItem.start) {
         setProbePositionFromImagePercent(activeItem.start.x, activeItem.start.y);
-        probe.style.transform = `translate(-50%, -50%) rotate(${activeItem.rotate || 0}deg)`;
+        probe.style.transform = probeTransform(activeItem.rotate || 0);
     }
 
     // If tilt slider exists, initialize its value to match probe position
@@ -622,7 +723,7 @@ function applyProbeMove() {
     if (!isHoldingProbe || !activeItem || !lastProbeMovePosition) return;
     const { clientX, clientY } = lastProbeMovePosition;
     const rect = vContainer.getBoundingClientRect();
-    const activeImg = document.querySelector('#viewer img.active');
+    const activeImg = getProbeReferenceImage();
     let curX, curY;
     if (activeImg && activeImg.clientWidth > 0) {
         const imgRect = activeImg.getBoundingClientRect();
@@ -685,7 +786,7 @@ function applyProbeMove() {
             const xpos = S.x + vSE.x * r;
             const ypos = S.y + vSE.y * r;
             setProbePositionFromImagePercent(xpos, ypos);
-            currentTransform = `translate(-50%, -50%) rotate(${activeItem.rotate || 0}deg)`;
+            currentTransform = probeTransform(activeItem.rotate || 0);
         }
     }
 
@@ -701,7 +802,7 @@ function applyProbeMove() {
         probe.style.opacity = 1;
     }
     
-    const frame = Math.floor(r * 199) + 1;
+    const frame = Math.floor(r * (currentFrameCount - 1)) + 1;
     if (frame !== currentFrame) update(frame);
     updateBeam();
         // update tilt slider position when probe is moved by dragging
@@ -733,7 +834,7 @@ function updateBeam() {
     }
     const angleRad = currentRotation * (Math.PI / 180);
     const isAbdomen = activeItem.category === 'ABDOMEN' || activeItem.title.includes('腹部');
-    const localDirection = isAbdomen ? -Math.PI / 2 : Math.PI / 2;
+    const localDirection = usesSplitLayout() ? -Math.PI / 2 : (isAbdomen ? -Math.PI / 2 : Math.PI / 2);
     const directionRad = angleRad + localDirection;
 
     const absRot = Math.abs(currentRotation % 360);
@@ -767,11 +868,19 @@ function updateBeam() {
         beamCtx.setLineDash([]);
     }
 
-    const centerX = (probeRect.left + probeRect.width / 2) - containerRect.left;
-    const centerY = (probeRect.top + probeRect.height / 2) - containerRect.top;
+    let centerX = (probeRect.left + probeRect.width / 2) - containerRect.left;
+    let centerY = (probeRect.top + probeRect.height / 2) - containerRect.top;
+    if (usesSplitLayout()) {
+        const tipLeft = parseFloat(probe.style.left);
+        const tipTop = parseFloat(probe.style.top);
+        if (Number.isFinite(tipLeft) && Number.isFinite(tipTop)) {
+            centerX = (tipLeft / 100) * width;
+            centerY = (tipTop / 100) * height;
+        }
+    }
     const lineOffset = activeItem.lineRotate || 0;
-    const bottomCenterX = centerX + Math.cos(directionRad) * (distToTip + 1);
-    const bottomCenterY = centerY + Math.sin(directionRad) * (distToTip + 1);
+    const bottomCenterX = usesSplitLayout() ? centerX : centerX + Math.cos(directionRad) * (distToTip + 1);
+    const bottomCenterY = usesSplitLayout() ? centerY : centerY + Math.sin(directionRad) * (distToTip + 1);
     const finalLineAngle = angleRad + (lineOffset * Math.PI / 180);
 
     const p1 = {
@@ -827,7 +936,7 @@ window.submitFeedback = submitFeedback;
 function clampFrameValue(value) {
     const parsed = parseInt(value, 10);
     if (Number.isNaN(parsed)) return 1;
-    return Math.max(1, Math.min(200, parsed));
+    return Math.max(1, Math.min(currentFrameCount, parsed));
 }
 
 function setupFrameJumpControls() {
@@ -863,13 +972,17 @@ function setupFrameJumpControls() {
 initMenu();
 
 // 腹部ナビゲーションのボタンにツールチップを追加
-menuConfig[0].items.forEach((item, idx) => {
-    const btn = document.querySelector(`[onclick="openScanner(menuConfig[0].items[${idx}])"]`);
-    if (btn) {
-        btn.title = `主な構造物：
-${item.structures.join('、')}`;
-    }
-});
+const abdomenCategoryIndex = menuConfig.findIndex(cat => cat.category === 'ABDOMEN');
+if (abdomenCategoryIndex >= 0) {
+    menuConfig[abdomenCategoryIndex].items.forEach((item, idx) => {
+        const btn = document.querySelector(`[onclick="openScanner(menuConfig[${abdomenCategoryIndex}].items[${idx}])"]`);
+        if (btn) {
+            const structures = Array.isArray(item.structures) ? item.structures : [];
+            btn.title = `主な構造物：
+${structures.join('、')}`;
+        }
+    });
+}
 
 setTimeout(() => {
     initProbe();
