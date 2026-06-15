@@ -1218,7 +1218,7 @@ def render_page(
             width: 54px;
             border: 0;
             background: transparent;
-            transform-origin: center;
+            transform-origin: center top;
             pointer-events: none;
             z-index: 3;
         }}
@@ -1400,7 +1400,7 @@ def render_preview(project_root: Path, prepared: PreparedEchoResult) -> str:
                     const angle = Math.atan2(end.y - start.y, end.x - start.x) * 180 / Math.PI + 90;
                     probe.style.left = start.x + '%';
                     probe.style.top = start.y + '%';
-                    probe.style.transform = `translate(-50%, -50%) rotate(${{angle}}deg)`;
+                    probe.style.transform = `translate(-50%, 0%) rotate(${{angle}}deg)`;
                     probe.style.display = 'block';
                     line.innerHTML = `<line x1="${{start.x}}%" y1="${{start.y}}%" x2="${{end.x}}%" y2="${{end.y}}%" />`;
                 }}

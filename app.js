@@ -71,6 +71,11 @@ function getProbeReferenceImage() {
     return document.querySelector('#viewer img.active');
 }
 
+function probeTransform(rotation, alignTip = usesSplitLayout()) {
+    const translate = alignTip ? 'translate(-50%, 0%)' : 'translate(-50%, -50%)';
+    return `${translate} rotate(${rotation || 0}deg)`;
+}
+
 function syncFrameControls() {
     const slider = document.getElementById('frame-slider');
     const frameInput = document.getElementById('frame-input');
@@ -243,7 +248,7 @@ async function openScanner(item) {
 
     if (probe && item.start) {
         setProbePositionFromImagePercent(item.start.x, item.start.y);
-        probe.style.transform = `translate(-50%, -50%) rotate(${item.rotate || 0}deg)`;
+        probe.style.transform = probeTransform(item.rotate || 0);
     }
 
     const caseData = activeData?.[item.title] || {};
@@ -679,7 +684,7 @@ function initProbe() {
         }
     } else if (activeItem.start) {
         setProbePositionFromImagePercent(activeItem.start.x, activeItem.start.y);
-        probe.style.transform = `translate(-50%, -50%) rotate(${activeItem.rotate || 0}deg)`;
+        probe.style.transform = probeTransform(activeItem.rotate || 0);
     }
 
     // If tilt slider exists, initialize its value to match probe position
@@ -781,7 +786,7 @@ function applyProbeMove() {
             const xpos = S.x + vSE.x * r;
             const ypos = S.y + vSE.y * r;
             setProbePositionFromImagePercent(xpos, ypos);
-            currentTransform = `translate(-50%, -50%) rotate(${activeItem.rotate || 0}deg)`;
+            currentTransform = probeTransform(activeItem.rotate || 0);
         }
     }
 
@@ -829,7 +834,7 @@ function updateBeam() {
     }
     const angleRad = currentRotation * (Math.PI / 180);
     const isAbdomen = activeItem.category === 'ABDOMEN' || activeItem.title.includes('腹部');
-    const localDirection = isAbdomen ? -Math.PI / 2 : Math.PI / 2;
+    const localDirection = usesSplitLayout() ? -Math.PI / 2 : (isAbdomen ? -Math.PI / 2 : Math.PI / 2);
     const directionRad = angleRad + localDirection;
 
     const absRot = Math.abs(currentRotation % 360);
@@ -863,11 +868,19 @@ function updateBeam() {
         beamCtx.setLineDash([]);
     }
 
-    const centerX = (probeRect.left + probeRect.width / 2) - containerRect.left;
-    const centerY = (probeRect.top + probeRect.height / 2) - containerRect.top;
+    let centerX = (probeRect.left + probeRect.width / 2) - containerRect.left;
+    let centerY = (probeRect.top + probeRect.height / 2) - containerRect.top;
+    if (usesSplitLayout()) {
+        const tipLeft = parseFloat(probe.style.left);
+        const tipTop = parseFloat(probe.style.top);
+        if (Number.isFinite(tipLeft) && Number.isFinite(tipTop)) {
+            centerX = (tipLeft / 100) * width;
+            centerY = (tipTop / 100) * height;
+        }
+    }
     const lineOffset = activeItem.lineRotate || 0;
-    const bottomCenterX = centerX + Math.cos(directionRad) * (distToTip + 1);
-    const bottomCenterY = centerY + Math.sin(directionRad) * (distToTip + 1);
+    const bottomCenterX = usesSplitLayout() ? centerX : centerX + Math.cos(directionRad) * (distToTip + 1);
+    const bottomCenterY = usesSplitLayout() ? centerY : centerY + Math.sin(directionRad) * (distToTip + 1);
     const finalLineAngle = angleRad + (lineOffset * Math.PI / 180);
 
     const p1 = {
