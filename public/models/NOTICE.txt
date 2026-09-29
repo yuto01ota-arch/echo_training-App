@@ -1,0 +1,42 @@
+Human Base Meshes — source and license
+====================================
+
+Assets: Body Male - Realistic / Body Female - Realistic
+Author: Dan Ulrich (as recorded in the source collection metadata)
+Publisher: Blender Studio and community contributors
+Bundle: Human Base Meshes v1.4.1
+License: CC0 1.0 Universal
+License text: https://creativecommons.org/publicdomain/zero/1.0/legalcode
+Official page: https://www.blender.org/download/demo-files/#assets
+Source archive:
+https://download.blender.org/demo/asset-bundles/human-base-meshes/human-base-meshes-bundle-v1.4.1.zip
+Source archive SHA-256:
+811f43accbb31a88266d932f8f5563b2d13586fca0ba2693aad1f5fe582b3515
+
+The source bundle's README states:
+"All provided assets are public domain under the CC0 license."
+
+Changes for ECHO TRAINING:
+- Extracted the two realistic whole-body meshes and their original eye meshes.
+- Used multiresolution level 1 and smooth normals.
+- Packed UVs into single-tile atlases and added baked skin color, normal,
+  and roughness textures, plus separate eye color textures.
+- Centered each body and placed its feet at ground level.
+- Added a basic 19-bone FK skeleton and automatic skin weights.
+- Exported self-contained, uncompressed GLB files without animation clips.
+
+The body surfaces are the original Human Base Meshes geometry, not shapes
+procedurally approximated by this application. The added rig is a basic posing
+aid; it does not include individual finger, facial, or corrective muscle rigs.
+Modified mesh assets and added rig data are also provided under CC0 1.0.
+
+Skin and eye textures added by this project
+=========================================
+The skin albedo swatch was newly generated with the built-in image_gen tool;
+it is not a photograph/scan of a real person or an asset from the Blender bundle.
+Blender projects that swatch onto the body, adds subtle local color tints,
+and bakes color, normal, and roughness maps. Eye colors are baked separately.
+Source image, generation prompt, and baking workflow are recorded in
+assets/textures/README.md and assets/textures/generation-prompt.txt.
+The Blender bundle's CC0 statement above describes the original mesh assets;
+it is not a statement that these new textures were supplied by Blender.

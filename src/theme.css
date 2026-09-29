@@ -1,0 +1,22 @@
+/* Light colors stay beside each rule; dark colors share this palette. */
+:root {
+  color-scheme: light;
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #121b20;
+  --surface: #1c282e;
+  --viewport: #25343b;
+  --neutral: #25343b;
+  --hover: #30454b;
+  --selected: #25423f;
+  --border: #40565f;
+  --accent-border: #5e9d94;
+  --text: #e3eeef;
+  --muted: #adbec3;
+  --accent: #8bd3c5;
+  --focus: #81d8cf;
+  --error: #ffab9c;
+  --warning-bg: #493225;
+  --warning-text: #ffd3b1;
+}

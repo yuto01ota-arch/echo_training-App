@@ -1,0 +1,19 @@
+{
+  "name": "echo-training-developer",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build-editor.js",
+    "predeploy": "npm run build",
+    "precheck": "npm run build",
+    "dev": "node ../scripts/dev.js --editor-only",
+    "deploy": "wrangler deploy",
+    "check": "wrangler deploy --dry-run",
+    "dev:status": "node ../scripts/dev.js status",
+    "dev:stop": "node ../scripts/dev.js stop",
+    "dev:restart": "node ../scripts/dev.js restart --editor-only"
+  },
+  "devDependencies": {
+    "wrangler": "^4.139.0"
+  }
+}
