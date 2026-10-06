@@ -85,6 +85,15 @@ export const EDITOR = Object.freeze({
   maxZoom: 12,
 });
 
+// 新規部位のtilt：体表に垂直な姿勢を0度とする。皮膚側への反転を防ぐ。
+export const TILT = Object.freeze({
+  startAngle: -30,
+  endAngle: 30,
+  maxAngle: 80,
+  minAngleRange: 1,
+  dragAxis: "x",
+});
+
 // カメラのクリップ面（モデル空間）。表示位置自体は各部位の設定を使います。
 export const CAMERA = Object.freeze({ near: 0.01, far: 30 });
 

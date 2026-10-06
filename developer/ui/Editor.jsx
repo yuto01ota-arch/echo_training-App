@@ -1,6 +1,7 @@
 import ThemeToggle from "../../src/components/ThemeToggle.jsx";
 import { preferredTheme, themeURL } from "../../src/theme.js";
-import { API, EDITOR, VALIDATION, FRAME_COUNT } from "../../src/config.js";
+import { API, EDITOR, VALIDATION, FRAME_COUNT, TILT } from "../../src/config.js";
+import { editableMotion } from "../../src/echo/scanMotion.js";
 import { loadCustomScans } from "../../src/custom/catalog.js";
 import { editorScans, validateSettings } from "../../src/custom/settings.js";
 import ExistingPreview from "./ExistingPreview.jsx";
@@ -56,13 +57,15 @@ export default function Editor() {
     [message, setMessage] = useState(""),
     [error, setError] = useState(""),
     [saved, setSaved] = useState(null);
+  const [motion, setMotion] = useState(editableMotion);
+  const fixedTilt = motion.type === "tilt";
   const [theme, setTheme] = useState(preferredTheme);
   const [publicURL, setPublicURL] = useState("");
   const [step, setStep] = useState(0);
   const [intent, setIntent] = useState("create");
   const [editing, setEditing] = useState(null);
   const frameCount = editing?.frameCount ?? FRAME_COUNT;
-  const [catalog, setCatalog] = useState(() => editorScans([]));
+  const [catalog, setCatalog] = useState([]);
   const [catalogError, setCatalogError] = useState("");
   async function refreshCatalog() {
     try {
@@ -77,7 +80,11 @@ export default function Editor() {
   }
   async function openExisting(id, entries = catalog) {
     const scan = entries.find((item) => item.id === id);
-    if (!scan) return;
+    if (!scan) {
+      newScan();
+      setMessage("この部位は削除されています。一覧を更新しました。");
+      return;
+    }
     setIntent("edit");
     setEditing(scan);
     setSaved(null);
@@ -94,6 +101,7 @@ export default function Editor() {
       setPose(setting.pose);
       setView(setting.view);
       setRotate(setting.rotate);
+      setMotion(editableMotion(scan));
       setTitle(scan.title);
       setCategory(scan.category ?? "部位");
     } catch (cause) {
@@ -116,6 +124,7 @@ export default function Editor() {
     setCrop(100);
     setFrame(1);
     setRotate(0);
+    setMotion(editableMotion());
     setModel("male");
     setPose("standing");
     setView("front");
@@ -157,6 +166,9 @@ export default function Editor() {
     editor.current?.setPreview(frame, rotate);
   }, [frame, rotate]);
   useEffect(() => {
+    editor.current?.setMotion(motion);
+  }, [motion]);
+  useEffect(() => {
     if (!images || editing) return;
     const url = URL.createObjectURL(images.frames[frame - 1]);
     setImageURL(url);
@@ -184,6 +196,9 @@ export default function Editor() {
           pose: value.pose,
           view: value.view,
           rotate: value.rotate,
+          type: value.type ?? "linear",
+          startAngle: value.type === "tilt" ? value.startAngle : undefined,
+          endAngle: value.type === "tilt" ? value.endAngle : undefined,
           path: value.path && {
             start: point(value.path.start), end: point(value.path.end),
           },
@@ -200,12 +215,12 @@ export default function Editor() {
       );
     if (
       fingerprint(saved) !==
-      fingerprint({ ...geometry, model, pose, view, rotate })
+      fingerprint({ ...geometry, model, pose, view, rotate, ...motion })
     ) {
       setSaved(null);
       setMessage("保存していない変更があります。");
     }
-  }, [editing, saved, busy, geometry, model, pose, view, rotate]);
+  }, [editing, saved, busy, geometry, model, pose, view, rotate, motion]);
   const locked = !!busy || (!!saved && !editing);
   async function extract() {
     setError("");
@@ -237,7 +252,7 @@ export default function Editor() {
     try {
       if (editing) {
         const settings = validateSettings(
-          { ...geometry, model, pose, view, rotate },
+          { ...geometry, model, pose, view, rotate, ...motion },
           editing,
         );
         await editor.current.validatePath((n) =>
@@ -268,6 +283,7 @@ export default function Editor() {
         view,
         rotate,
         ...geometry,
+        ...motion,
         imageWidth: images.imageWidth,
         imageHeight: images.imageHeight,
       });
@@ -316,6 +332,29 @@ export default function Editor() {
       setBusy("");
     }
   }
+  async function deleteScan() {
+    if (!editing || busy) return;
+    const target = editing;
+    if (!window.confirm(
+      `「${target.title}」を削除しますか？\n部位選択と編集一覧から削除され、未保存の変更は破棄されます。\n保存データは保持されますが、画面から復元する機能はありません。`,
+    )) return;
+    setBusy("delete");
+    setError("");
+    try {
+      await api(`/api/scans/${target.id}`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ revision: target.revision ?? null }),
+      });
+      setCatalog(items => items.filter(scan => scan.id !== target.id));
+      newScan();
+      setMessage(`「${target.title}」を削除しました。通常画面を再読み込みすると反映されます。`);
+    } catch (cause) {
+      setError(cause.message);
+    } finally {
+      setBusy("");
+    }
+  }
   function modelChange(value) {
     setModel(value);
     setPose("standing");
@@ -356,11 +395,11 @@ export default function Editor() {
               新しい部位を追加
             </button>
             <button
-              disabled={!!busy || status.loading}
+              disabled={!!busy || status.loading || !catalog.length}
               aria-pressed={intent === "edit"}
               onClick={() => {
                 if (intent !== "edit")
-                  openExisting(editing?.id ?? catalog[0].id);
+                  openExisting(editing?.id ?? catalog[0]?.id);
               }}
             >
               既存部位を編集
@@ -405,7 +444,13 @@ export default function Editor() {
               >
                 保存済みの設定を再読み込み
               </button>
+              <button className="danger" disabled={!!busy} onClick={deleteScan}>
+                {busy === "delete" ? "削除中…" : "この部位を削除"}
+              </button>
             </>
+          )}
+          {!catalog.length && !catalogError && !status.loading && (
+            <span className="hint">編集できる部位はありません。新しい部位を追加できます。</span>
           )}
           {catalogError && (
             <span role="alert">
@@ -464,7 +509,7 @@ export default function Editor() {
                   <h2>{editing.title}</h2>
                   <p>登録済みのエコー画像を使って設定を調整します。</p>
                   <p className="hint">
-                    動画の再登録は不要です。画像・構造物の表示データ・走査方式は維持されます。
+                    動画の再登録は不要です。画像・構造物の表示データは維持されます。走査方式は「3. プローブ」で変更できます。
                   </p>
                   <p className="hint">
                     部位を切り替える前に変更を保存してください。
@@ -601,18 +646,28 @@ export default function Editor() {
             </fieldset>
             <fieldset
               id="panel-2"
+              className={fixedTilt ? "probe-settings--tilt" : undefined}
               role="tabpanel"
               aria-labelledby="step-2"
               hidden={step !== 2}
               disabled={locked || status.loading}
             >
-              <legend>3. プローブの開始点・終了点</legend>
+              <legend>{fixedTilt ? "3. プローブの接触位置・角度" : "3. プローブの開始点・終了点"}</legend>
+              <label className="motion-select">
+                走査方式
+                <select value={motion.type} onChange={(e) => setMotion({ ...motion, type: e.target.value })}>
+                  <option value="linear">直線移動</option>
+                  <option value="tilt">tilt（傾ける）</option>
+                </select>
+              </label>
               <div className="row wrap">
-                {[
+                {(fixedTilt ? [
+                  ["camera", "カメラ操作"], ["start", "接触位置を指定"],
+                ] : [
                   ["camera", "カメラ操作"],
                   ["start", "開始点を指定"],
                   ["end", "終了点を指定"],
-                ].map(([id, label]) => (
+                ]).map(([id, label]) => (
                   <button
                     key={id}
                     aria-pressed={geometry.mode === id}
@@ -621,18 +676,18 @@ export default function Editor() {
                     {label}
                   </button>
                 ))}
+                {fixedTilt && <button onClick={() => editor.current?.resetPoints()}>点をクリア</button>}
               </div>
               <p className="hint">
-                「開始点を指定」を押して人体をクリックし、続けて終了点をクリックしてください。
-                {editing?.type === "tilt"
-                  ? "この部位は傾ける走査です。同じ位置を使う場合は開始点と終了点を同じ座標にします。"
-                  : "2点を結ぶ直線上を等速で移動します。"}
+                {fixedTilt
+                  ? "「接触位置を指定」を押して人体を1回クリック。位置を固定し、等速で傾けます。"
+                  : "開始点、終了点の順に人体をクリック。2点を結ぶ直線上を等速で移動します。"}
               </p>
               <div className="coordinates">
-                {[
+                {(fixedTilt ? [["start", "接触位置"]] : [
                   ["start", "開始点"],
                   ["end", "終了点"],
-                ].map(([name, label]) => (
+                ]).map(([name, label]) => (
                   <div key={name}>
                     <strong>{label}</strong>
                     {["x", "y"].map((axis) => (
@@ -659,9 +714,22 @@ export default function Editor() {
                   </div>
                 ))}
               </div>
-              <button onClick={() => editor.current?.resetPoints()}>
+              {!fixedTilt && <button onClick={() => editor.current?.resetPoints()}>
                 点をクリア
-              </button>
+              </button>}
+              {fixedTilt && <>
+                <div className="row">
+                  {[["startAngle", "開始角度（度）"], ["endAngle", "終了角度（度）"]].map(([key, label]) => (
+                    <label key={key}>
+                      {label}
+                      <input type="number" min={-TILT.maxAngle} max={TILT.maxAngle}
+                        step={EDITOR.rotationStep} value={motion[key]}
+                        onChange={(e) => setMotion({ ...motion, [key]: e.target.value === "" ? "" : Number(e.target.value) })} />
+                    </label>
+                  ))}
+                </div>
+                <p className="hint">0°は体表に垂直。±{TILT.maxAngle}°以内で設定します。向きで傾ける方向を調整し、プレビューで確認してください。</p>
+              </>}
               <label>
                 プローブの向き（度）
                 <input
@@ -682,7 +750,7 @@ export default function Editor() {
                 {geometry.mode === "camera"
                   ? "カメラを操作できます"
                   : geometry.mode === "start"
-                    ? "開始点をクリック"
+                    ? (fixedTilt ? "接触位置をクリック" : "開始点をクリック")
                     : "終了点をクリック"}
               </span>
             </div>
@@ -693,7 +761,7 @@ export default function Editor() {
               >
                 <canvas ref={canvas} aria-label="編集用人体モデル" />
                 <svg aria-hidden="true">
-                  {geometry.markers.start && geometry.markers.end && (
+                  {!fixedTilt && geometry.markers.start && geometry.markers.end && (
                     <line
                       x1={`${geometry.markers.start.x}%`}
                       y1={`${geometry.markers.start.y}%`}
@@ -701,7 +769,7 @@ export default function Editor() {
                       y2={`${geometry.markers.end.y}%`}
                     />
                   )}{" "}
-                  {Object.entries(geometry.markers).map(([key, point]) => (
+                  {Object.entries(geometry.markers).filter(([key]) => !fixedTilt || key === "start").map(([key, point]) => (
                     <g key={key}>
                       <circle cx={`${point.x}%`} cy={`${point.y}%`} r="6" />
                       <text
@@ -710,7 +778,7 @@ export default function Editor() {
                         dx="10"
                         dy="-10"
                       >
-                        {key === "start" ? "開始" : "終了"}
+                        {fixedTilt ? "接触位置" : key === "start" ? "開始" : "終了"}
                       </text>
                     </g>
                   ))}
@@ -739,7 +807,7 @@ export default function Editor() {
               <p role="alert">{status.error || geometry.error}</p>
             )}
             <label className="preview-slider">
-              スキャン位置 · {frame} / {frameCount}
+              {motion.type === "tilt" ? "プローブの傾き" : "スキャン位置"} · {frame} / {frameCount}
               <input
                 type="range"
                 min="1"

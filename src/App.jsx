@@ -47,7 +47,9 @@ export default function App() {
   const [customScans, setCustomScans] = useState([]);
   const [catalogLoading, setCatalogLoading] = useState(!!developerURL);
   const [catalogError, setCatalogError] = useState("");
-  const scan = developer ? null : scanFromHash(route, customScans);
+  const scan = developer ? null :
+    (catalogLoading || catalogError) && route.startsWith("#/echo/")
+      ? { invalid: true } : scanFromHash(route, customScans);
   const returnPosition = useRef(null);
   const [model, setModel] = useState({
     name: "人体モデル",
@@ -194,7 +196,7 @@ export default function App() {
           (scan.invalid ? (
             <section className="echo-screen">
               <h1>
-                {catalogLoading && route.startsWith("#/echo/custom-")
+                {catalogLoading
                   ? "部位を読み込み中…"
                   : "部位が見つかりません"}
               </h1>
@@ -244,7 +246,7 @@ export default function App() {
                 {MODELS.map((item) => (
                   <button
                     key={item.id}
-                    disabled={loading || !!fatal}
+                    disabled={loading || !!fatal || catalogLoading || !!catalogError}
                     aria-pressed={model.id === item.id}
                     onClick={() => viewer.current?.loadBuiltin(item.id)}
                   >
@@ -303,11 +305,13 @@ export default function App() {
             </p>
           )}
           <BodyRegions
-            customScans={customScans.filter((item) => item.custom)}
+            customScans={customScans.filter((item) => item.custom && !item.deleted)}
+            deletedScanIds={customScans.filter(item => item.deleted).map(item => item.id)}
+            catalogReady={!catalogLoading && !catalogError}
             viewer={viewer}
             model={model}
             pose={pose}
-            disabled={loading || !!fatal}
+            disabled={loading || !!fatal || catalogLoading || !!catalogError}
             onSelect={openScan}
           />
         </div>

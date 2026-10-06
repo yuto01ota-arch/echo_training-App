@@ -17,11 +17,8 @@ export const SCANS = menuConfig.flatMap((category) =>
 
 export function scanFromHash(hash, extraScans = []) {
   if (!hash || hash === "#" || hash === "#/") return null;
-  return (
-    [...extraScans, ...SCANS].find((scan) => hash === `#/echo/${scan.id}`) ?? {
-      invalid: true,
-    }
-  );
+  const scan = [...extraScans, ...SCANS].find(scan => hash === `#/echo/${scan.id}`);
+  return !scan || scan.deleted ? { invalid: true } : scan;
 }
 
 export function frameFile(scan, frame) {

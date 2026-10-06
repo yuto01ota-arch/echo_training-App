@@ -1,3 +1,4 @@
+import { editableMotion } from "../../src/echo/scanMotion.js";
 import { FRAME_COUNT, EDITOR, CAMERA } from "../../src/config.js";
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
@@ -13,6 +14,7 @@ import {
 } from "../../src/three/customScan.js";
 import { renderSnapshot } from "../../src/three/renderSnapshot.js";
 import { placeProbe } from "../../src/three/probe.js";
+import { validateTiltAngles } from "../../src/custom/schema.js";
 
 export function createModelEditor(canvas, onChange, onStatus) {
   let ready = false,
@@ -86,6 +88,7 @@ export function createModelEditor(canvas, onChange, onStatus) {
       markers = {};
     try {
       const body = bodyMesh(object);
+      if (motion.type === "tilt") validateTiltAngles(motion);
       for (const [name, point] of Object.entries(path))
         markers[name] = project(
           (path.start && path.end
@@ -183,9 +186,10 @@ export function createModelEditor(canvas, onChange, onStatus) {
       return;
     }
     plane = nextPlane;
-    path = { ...path, [mode]: point };
+    const fixedTilt = motion.type === "tilt";
+    path = fixedTilt ? { start: point, end: { ...point } } : { ...path, [mode]: point };
     clearContacts();
-    mode = mode === "start" ? "end" : "camera";
+    mode = !fixedTilt && mode === "start" ? "end" : "camera";
     controls.enabled = mode === "camera";
     onStatus({ loading: false, error: "" });
     draw();
@@ -213,7 +217,8 @@ export function createModelEditor(canvas, onChange, onStatus) {
       path = structuredClone(setting.path);
       plane = structuredClone(setting.plane);
       clearContacts();
-      motion = scan;
+      motion = editableMotion(scan);
+      if (motion.type === "tilt") path.end = { ...path.start };
       frameCount = scan.frameCount;
       frame = 1;
       rotate = setting.rotate;
@@ -248,9 +253,22 @@ export function createModelEditor(canvas, onChange, onStatus) {
     setCoordinate(name, axis, value) {
       if (path[name] && Number.isFinite(value)) {
         path = { ...path, [name]: { ...path[name], [axis]: value } };
+        if (motion.type === "tilt")
+          path = { start: path[name], end: { ...path[name] } };
         clearContacts();
         draw();
       }
+    },
+    setMotion(next) {
+      const wasTilt = motion.type === "tilt";
+      motion = next;
+      const fixedTilt = motion.type === "tilt";
+      if (fixedTilt && path.start) path = { start: path.start, end: { ...path.start } };
+      else if (wasTilt && !fixedTilt) path = path.start ? { start: path.start } : {};
+      mode = "camera";
+      controls.enabled = true;
+      if (wasTilt !== fixedTilt) clearContacts();
+      schedule();
     },
     setPreview(nextFrame, nextRotate) {
       frame = nextFrame;

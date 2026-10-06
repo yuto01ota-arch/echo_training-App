@@ -27,13 +27,18 @@ export default function BodyRegions({
   disabled,
   onSelect,
   customScans = [],
+  deletedScanIds = [],
+  catalogReady = true,
 }) {
   const root = useRef(null);
   const canvases = useRef({});
   const [side, setSide] = useState("right");
   const [points, setPoints] = useState({});
   const [selected, setSelected] = useState(null);
-  const available = model.kind === "builtin" && !disabled;
+  const deleted = new Set(deletedScanIds);
+  const regions = catalogReady ? REGIONS.filter(region => !deleted.has(region.id)) : [];
+  const visiblePoints = (view) => (points[view] ?? []).filter(point => !deleted.has(point.id));
+  const available = model.kind === "builtin" && !disabled && catalogReady;
   useEffect(() => {
     if (!available) {
       setPoints({});
@@ -126,7 +131,7 @@ export default function BodyRegions({
               />
               {available && (
                 <svg className="region-lines" aria-hidden="true">
-                  {(points[view] ?? []).map((point) => (
+                  {visiblePoints(view).map((point) => (
                     <g
                       key={point.id}
                       className={selected?.id === point.id ? "is-selected" : ""}
@@ -145,7 +150,7 @@ export default function BodyRegions({
                         r="10"
                         onClick={() =>
                           select(
-                            REGIONS.find((region) => region.id === point.id),
+                            regions.find((region) => region.id === point.id),
                           )
                         }
                       />
@@ -154,11 +159,11 @@ export default function BodyRegions({
                 </svg>
               )}
               {available &&
-                (points[view] ?? []).map((point) => {
-                  const index = REGIONS.findIndex(
+                visiblePoints(view).map((point) => {
+                  const index = regions.findIndex(
                     (region) => region.id === point.id,
                   );
-                  const region = REGIONS[index];
+                  const region = regions[index];
                   return (
                     <button
                       key={point.id}
@@ -186,7 +191,7 @@ export default function BodyRegions({
               )}
             </div>
             <div className="region-list">
-              {REGIONS.map(
+              {regions.map(
                 (region, index) =>
                   region.view === (view === "side" ? side : view) && (
                     <button
@@ -221,7 +226,7 @@ export default function BodyRegions({
         ))}
       </div>
       <div className="region-detail" aria-live="polite" aria-atomic="true">
-        {selected && available ? (
+        {selected && available && !deleted.has(selected.id) ? (
           <>
             <p>選択中の部位</p>
             <h3>{selected.title}</h3>

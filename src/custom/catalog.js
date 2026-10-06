@@ -24,6 +24,11 @@ export async function loadCustomScans(developerURL, signal) {
       const builtin = builtinScan(record.id);
       if ((!builtin && !CUSTOM_ID.test(record.id)) || seen.has(record.id))
         continue;
+      if (record.deleted === true) {
+        scans.push({ id: record.id, deleted: true, revision: record.revision ?? null });
+        seen.add(record.id);
+        continue;
+      }
       scans.push(
         builtin
           ? {
@@ -46,5 +51,5 @@ export async function loadCustomScans(developerURL, signal) {
     }
     cursor = data.cursor || "";
   } while (cursor);
-  return scans.sort((a, b) => a.title.localeCompare(b.title, "ja"));
+  return scans.sort((a, b) => (a.title ?? "").localeCompare(b.title ?? "", "ja"));
 }

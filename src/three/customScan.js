@@ -131,7 +131,9 @@ export function settingsProbeOrientation(scan, progress) {
     tilt:
       scan.type === "tilt"
         ? THREE.MathUtils.degToRad(
-            (scan.endAngle - scan.startAngle) * (progress - 0.5),
+            scan.custom || scan.angleReference === "surface"
+              ? THREE.MathUtils.lerp(scan.startAngle, scan.endAngle, THREE.MathUtils.clamp(progress, 0, 1))
+              : (scan.endAngle - scan.startAngle) * (progress - 0.5),
           )
         : 0,
   };

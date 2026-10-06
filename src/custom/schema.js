@@ -1,7 +1,14 @@
-import { FRAME_COUNT, PACK_SIZE, VALIDATION, IMAGE } from "../config.js";
+import { FRAME_COUNT, PACK_SIZE, VALIDATION, IMAGE, TILT } from "../config.js";
 // 既存の呼び出し元向け再エクスポート。値の定義は config.js のみ。
 export { FRAME_COUNT, PACK_SIZE, PACK_COUNT } from "../config.js";
 export const CUSTOM_ID = /^custom-[a-f0-9-]{36}$/;
+
+export function validateTiltAngles({ startAngle, endAngle }) {
+  if (![startAngle, endAngle].every(angle =>
+    Number.isFinite(angle) && Math.abs(angle) <= TILT.maxAngle,
+  ) || Math.abs(endAngle - startAngle) < TILT.minAngleRange)
+    throw new Error(`tiltの角度は−${TILT.maxAngle}〜${TILT.maxAngle}度で、開始と終了を${TILT.minAngleRange}度以上離してください。`);
+}
 
 export function validateScan(input, {
   allowStationary = false,
@@ -41,6 +48,10 @@ export function validateScan(input, {
   )
     fail();
   const { camera, plane, path } = input;
+  // Records created before motion selection are straight scans.
+  const type = input.type === undefined ? "linear" : input.type;
+  if (!["linear", "tilt"].includes(type)) fail();
+  if (type === "tilt") validateTiltAngles(input);
   if (
     !camera ||
     !vector(camera.position) ||
@@ -81,11 +92,14 @@ export function validateScan(input, {
   )
     fail();
   if (
-    !allowStationary &&
+    type !== "tilt" && !allowStationary &&
     Math.hypot(path.start.x - path.end.x, path.start.y - path.end.y) <
       VALIDATION.minPathDistance
   )
     throw new Error("開始点と終了点は少し離して指定してください。");
+  if (type === "tilt" &&
+      (path.start.x !== path.end.x || path.start.y !== path.end.y))
+    throw new Error("tiltの接触位置は1点です。開始点と終了点を同じ座標にしてください。");
   if (
     !Number.isInteger(input.imageWidth) ||
     !Number.isInteger(input.imageHeight) ||
@@ -97,6 +111,13 @@ export function validateScan(input, {
   return {
     version: 1,
     custom: true,
+    type,
+    ...(type === "tilt" ? {
+      angleReference: "surface",
+      startAngle: input.startAngle,
+      endAngle: input.endAngle,
+      axis: TILT.dragAxis,
+    } : {}),
     title: input.title.trim(),
     category: input.category.trim(),
     model: input.model,

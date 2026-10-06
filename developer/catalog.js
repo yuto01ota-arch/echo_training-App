@@ -40,6 +40,9 @@ async function bytes(request, limit) {
   return result.buffer;
 }
 const packKey = (id, index) => `frames:${id}:${index}`;
+// A separate, permanent tombstone prevents an in-flight settings write from restoring a deleted scan.
+const deletionFor = (env, id) => env.SCANS.get(`deleted:${id}`, "json");
+const deletedResponse = () => json({ error: "この部位は削除されています。一覧を再読み込みしてください。" }, 410);
 const draftPackKey = (id, index) => `draft-frames:${id}:${index}`;
 
 export async function publicCatalog(request, env) {
@@ -57,7 +60,14 @@ export async function publicCatalog(request, env) {
         : {}),
     });
     const scans = (
-      await Promise.all(list.keys.map((key) => env.SCANS.get(key.name, "json")))
+      await Promise.all(list.keys.map(async (key) => {
+        const record = await env.SCANS.get(key.name, "json");
+        if (!record) return null;
+        const deletion = await deletionFor(env, record.id);
+        return deletion || record.deleted
+          ? { id: record.id, deleted: true, revision: deletion?.revision ?? record.revision }
+          : record;
+      }))
     ).filter(Boolean);
     return json(
       { scans, cursor: list.list_complete ? null : list.cursor },
@@ -72,7 +82,7 @@ export async function publicCatalog(request, env) {
     const id = match[1],
       frame = Number(match[2]);
     const record = await env.SCANS.get(`published:${id}`, "json");
-    if (!record || !Number.isInteger(frame) || frame < 1 || frame > record.frameCount)
+    if (!record || record.deleted || await deletionFor(env, id) || !Number.isInteger(frame) || frame < 1 || frame > record.frameCount)
       return json({ error: "Not Found" }, 404, true);
     const packSize = record.packSize ?? STORED_MEDIA.legacyPackSize;
     const buffer = await env.SCANS.get(
@@ -118,6 +128,31 @@ export async function editorAPI(request, env) {
       });
       return json({ id }, 201);
     }
+    const deleteMatch = url.pathname.match(/^\/api\/scans\/([a-zA-Z0-9_-]+)$/);
+    if (deleteMatch) {
+      if (request.method !== "DELETE") return json({ error: "Method Not Allowed" }, 405);
+      const id = deleteMatch[1];
+      const builtin = builtinScan(id);
+      if (!builtin && !CUSTOM_ID.test(id)) return json({ error: "Not Found" }, 404);
+      const previous = await env.SCANS.get(`published:${id}`, "json");
+      const existingDeletion = await deletionFor(env, id);
+      if (existingDeletion) {
+        // Repair the catalog entry if the first request stopped after writing the tombstone.
+        if (!previous) await env.SCANS.put(`published:${id}`, JSON.stringify(existingDeletion));
+        return json(existingDeletion);
+      }
+      if (!builtin && !previous) return json({ error: "部位が見つかりません。" }, 404);
+      const input = JSON.parse(new TextDecoder().decode(await bytes(request, API.maxSettingsBytes)));
+      if (input?.revision !== (previous?.revision ?? null))
+        return json({ error: "この部位は更新されています。設定を再読み込みしてから削除してください。" }, 409);
+      const record = {
+        id, deleted: true, revision: crypto.randomUUID(), deletedAt: new Date().toISOString(),
+      };
+      await env.SCANS.put(`deleted:${id}`, JSON.stringify(record));
+      // Keep stored settings/media intact. Only publish a small deletion marker to clients.
+      await env.SCANS.put(`published:${id}`, JSON.stringify({ ...(previous ?? {}), ...record }));
+      return json(record);
+    }
     const settingsMatch = url.pathname.match(
       /^\/api\/scans\/([a-zA-Z0-9_-]+)\/settings$/,
     );
@@ -129,6 +164,7 @@ export async function editorAPI(request, env) {
       if (!builtin && !CUSTOM_ID.test(id))
         return json({ error: "Not Found" }, 404);
       const previous = await env.SCANS.get(`published:${id}`, "json");
+      if (previous?.deleted || await deletionFor(env, id)) return deletedResponse();
       if (!builtin && !previous)
         return json({ error: "部位が見つかりません。" }, 404);
       const input = JSON.parse(
@@ -142,7 +178,7 @@ export async function editorAPI(request, env) {
           },
           409,
         );
-      const settings = validateSettings(input, builtin ?? previous);
+      const settings = validateSettings(input, builtin ? { ...builtin, ...previous, custom: false } : previous);
       const record = {
         ...(previous ?? {
           id,
@@ -154,7 +190,11 @@ export async function editorAPI(request, env) {
         revision: crypto.randomUUID(),
         updatedAt: new Date().toISOString(),
       };
+      if (settings.type === "linear") {
+        for (const field of ["startAngle", "endAngle", "angleReference", "axis"]) delete record[field];
+      }
       await env.SCANS.put(`published:${id}`, JSON.stringify(record));
+      if (await deletionFor(env, id)) return deletedResponse();
       return json(record);
     }
     const match = url.pathname.match(
@@ -164,6 +204,7 @@ export async function editorAPI(request, env) {
       return json({ error: "Not Found" }, 404);
     const [, id, index, publish] = match;
     const existing = await env.SCANS.get(`published:${id}`, "json");
+    if (existing?.deleted || await deletionFor(env, id)) return deletedResponse();
     if (existing)
       return publish && request.method === "POST"
         ? json(existing)
@@ -228,6 +269,7 @@ export async function editorAPI(request, env) {
       const record = { ...draft, createdAt: new Date().toISOString() };
       await env.SCANS.put(`published:${id}`, JSON.stringify(record));
       await env.SCANS.delete(`draft:${id}`);
+      if (await deletionFor(env, id)) return deletedResponse();
       return json(record, 201);
     }
     return json({ error: "Method Not Allowed" }, 405);
