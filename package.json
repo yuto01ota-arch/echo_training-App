@@ -1,0 +1,30 @@
+{
+  "name": "echo-training-3d-demo",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  },
+  "scripts": {
+    "dev": "node scripts/dev.js",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "node --test tests/*.test.js",
+    "test:e2e": "playwright test",
+    "test:editor": "playwright test --config playwright.editor.config.js",
+    "dev:status": "node scripts/dev.js status",
+    "dev:stop": "node scripts/dev.js stop",
+    "dev:restart": "node scripts/dev.js restart"
+  },
+  "dependencies": {
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "three": "^0.186.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "@vitejs/plugin-react": "^6.1.1",
+    "vite": "^8.3.0"
+  }
+}

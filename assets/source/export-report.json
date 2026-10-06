@@ -1,0 +1,24 @@
+[
+  {
+    "id": "male",
+    "collection": "Body Male - Realistic",
+    "author": "Dan Ulrich",
+    "bones": 19,
+    "vertices": 43434,
+    "triangles": 86856,
+    "bytes": 2435324,
+    "unweightedVertices": 0,
+    "weightMethod": "Blender automatic bone heat weights on base mesh, interpolated to subdivision level 1"
+  },
+  {
+    "id": "female",
+    "collection": "Body Female - Realistic",
+    "author": "Dan Ulrich",
+    "bones": 19,
+    "vertices": 43434,
+    "triangles": 86856,
+    "bytes": 2435496,
+    "unweightedVertices": 0,
+    "weightMethod": "Blender automatic bone heat weights on base mesh, interpolated to subdivision level 1"
+  }
+]

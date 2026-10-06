@@ -1,0 +1,18 @@
+Echo Training System — existing training content
+Source: https://github.com/yuto01ota-arch/echo_training-App
+Branch: main
+Commit: 11e6c5be96ec99a4d8d237a15826c111bf7c6e77
+
+The 2,200 frame images, two inhale videos and probe_image.png were copied
+without modification from the existing application for use in its 3d-demo
+branch. Original menu and annotation data are in src/echo/source/.
+The original software copyright/license text is retained in LISENCE.
+Copyright (c) 2026 [Takao]
+
+Original content notice from main/index.html:
+画像は被験者のご厚意により作られています。
+無断転用はしないでください。
+コンテンツの保護：アプリ内で使用されているエコー画像、動画、および各種ロゴ等のコンテンツに関する著作権は、当方に帰属します。
+プログラムがMITライセンスであっても、これら画像・動画データの無断転載、抽出、二次利用、および商用利用は一切禁止します。
+
+The CC0 notice for the Human Base Meshes does not apply to these echo assets.

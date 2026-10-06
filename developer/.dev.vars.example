@@ -1,0 +1,5 @@
+# Copy to .dev.vars for local development. This file is not deployed.
+# Use a unique password of at least 16 characters.
+DEVELOPER_PASSWORD=
+# Use a separate random value of at least 32 characters.
+SESSION_SECRET=

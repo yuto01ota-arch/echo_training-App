@@ -1,0 +1,22 @@
+[
+  {
+    "id": "male",
+    "textureSize": 2048,
+    "bytes": 14330908,
+    "maps": [
+      "male-skin-color",
+      "male-skin-normal",
+      "male-skin-roughness"
+    ]
+  },
+  {
+    "id": "female",
+    "textureSize": 2048,
+    "bytes": 14598216,
+    "maps": [
+      "female-skin-color",
+      "female-skin-normal",
+      "female-skin-roughness"
+    ]
+  }
+]
