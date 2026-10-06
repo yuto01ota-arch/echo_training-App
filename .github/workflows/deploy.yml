@@ -2,7 +2,7 @@ name: Deploy 3D demo to GitHub Pages
 
 on:
   push:
-    branches: [3d-demo]
+    branches: [main]
   workflow_dispatch:
 
 permissions:
