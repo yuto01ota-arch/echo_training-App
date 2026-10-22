@@ -3,13 +3,15 @@ name: Deploy 3D demo to GitHub Pages
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: github-pages
+  group: github-pages-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -19,19 +21,28 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version-file: .nvmrc
           cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            developer/package-lock.json
+      - run: node --version && npm --version
       - run: npm ci
+      - run: npm ci --prefix developer
       - run: npm test
+      - run: npm run check --prefix developer
       - run: npm run build
         env:
           VITE_DEVELOPER_URL: ${{ vars.DEVELOPER_URL }}
       - uses: actions/configure-pages@v5
+        if: github.event_name != 'pull_request'
       - uses: actions/upload-pages-artifact@v3
+        if: github.event_name != 'pull_request'
         with:
           path: dist
 
   deploy:
+    if: github.event_name != 'pull_request'
     needs: build
     runs-on: ubuntu-latest
     permissions:
