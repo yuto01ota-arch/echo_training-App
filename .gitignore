@@ -13,4 +13,6 @@ playwright-report/
 
 # Local server controller (no application data)
 .local-dev/
-tests/
+# Keep the existing unit tests available to GitHub Actions.
+tests/*
+!tests/*.test.js

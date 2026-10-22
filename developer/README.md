@@ -12,6 +12,10 @@ GitHub Pages側にはこのページのHTMLやパスワード照合処理を含�
 
 リポジトリのルートで実行します。
 
+Node.jsはルートの `.nvmrc` に揃えた **22.23.4** を使います（nvm利用時は先に `nvm use`）。Wrangler / MiniflareもNode.js上で動くため、Node.js本体と `developer/package-lock.json` の依存関係の両方を更新してください。
+
+2026年10月の[Undiciのセキュリティ修正](https://github.com/nodejs/undici/releases/tag/v7.30.1)に対応するため、`package.json` の `overrides` でMiniflare配下のUndiciを7.30.1に固定しています。Wrangler 4.151.3に含まれるMiniflareは修正前の7.29.1に依存するためです。将来この指定を外す際は、lockfileでも修正版以降を使用することを確認してください。
+
 ```sh
 npm ci --prefix developer
 npm run dev
